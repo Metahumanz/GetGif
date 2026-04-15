@@ -1,0 +1,1113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GetGif - 批量导出 GIF</title>
+  <meta name="description" content="批量扫描文件夹中的视频并导出 GIF">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    /* ═══ CSS Reset & Variables ═══ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary: #0a0a0f;
+      --bg-secondary: #12121a;
+      --bg-card: #1a1a28;
+      --bg-input: #22223a;
+      --bg-hover: #2a2a42;
+      --border: #2e2e4a;
+      --border-focus: #6c5ce7;
+      --text-primary: #e8e8f0;
+      --text-secondary: #9898b8;
+      --text-muted: #6868a0;
+      --accent: #6c5ce7;
+      --accent-light: #a29bfe;
+      --accent-glow: rgba(108, 92, 231, 0.25);
+      --success: #2ecc71;
+      --success-bg: rgba(46, 204, 113, 0.12);
+      --warning: #f39c12;
+      --warning-bg: rgba(243, 156, 18, 0.12);
+      --error: #e74c3c;
+      --error-bg: rgba(231, 76, 60, 0.12);
+      --info: #3498db;
+      --info-bg: rgba(52, 152, 219, 0.12);
+      --radius: 12px;
+      --radius-sm: 8px;
+      --radius-lg: 16px;
+      --shadow: 0 4px 24px rgba(0,0,0,0.3);
+      --shadow-lg: 0 8px 40px rgba(0,0,0,0.4);
+      --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      --font: 'Inter', -apple-system, system-ui, sans-serif;
+    }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* ═══ Background Effects ═══ */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(ellipse at 30% 20%, rgba(108,92,231,0.08) 0%, transparent 50%),
+                  radial-gradient(ellipse at 70% 80%, rgba(162,155,254,0.05) 0%, transparent 50%);
+      animation: bgShift 20s ease-in-out infinite alternate;
+      pointer-events: none;
+      z-index: 0;
+    }
+    @keyframes bgShift {
+      0%   { transform: translate(0, 0); }
+      100% { transform: translate(-5%, 3%); }
+    }
+
+    /* ═══ Layout ═══ */
+    .app-container {
+      position: relative;
+      z-index: 1;
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 40px 24px 80px;
+    }
+
+    /* ═══ Header ═══ */
+    .app-header {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+    .app-header .logo {
+      font-size: 48px;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--accent-light), var(--accent), #a29bfe);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -1px;
+    }
+    .app-header .subtitle {
+      color: var(--text-secondary);
+      font-size: 15px;
+      margin-top: 8px;
+      font-weight: 400;
+    }
+
+    /* Heartbeat indicator */
+    .heartbeat-dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--success);
+      margin-left: 10px;
+      vertical-align: middle;
+      box-shadow: 0 0 8px var(--success);
+      animation: pulse 1.5s ease-in-out infinite;
+      opacity: 0;
+      transition: opacity var(--transition);
+    }
+    .heartbeat-dot.active { opacity: 1; }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50%      { transform: scale(1.4); opacity: 0.6; }
+    }
+
+    /* ═══ Cards ═══ */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 28px;
+      margin-bottom: 24px;
+      box-shadow: var(--shadow);
+      transition: border-color var(--transition), box-shadow var(--transition);
+    }
+    .card:hover {
+      border-color: rgba(108,92,231,0.25);
+    }
+    .card-title {
+      font-size: 17px;
+      font-weight: 700;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .card-title .icon {
+      width: 32px;
+      height: 32px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+    .card-title .icon.purple  { background: var(--accent-glow); }
+    .card-title .icon.green   { background: var(--success-bg); }
+    .card-title .icon.blue    { background: var(--info-bg); }
+
+    /* ═══ Forms ═══ */
+    .form-group {
+      margin-bottom: 18px;
+    }
+    .form-group label {
+      display: block;
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 6px;
+      letter-spacing: 0.03em;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 12px 16px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      font-size: 14px;
+      font-family: var(--font);
+      transition: border-color var(--transition), box-shadow var(--transition);
+      outline: none;
+    }
+    .form-group input:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+    .form-group input::placeholder {
+      color: var(--text-muted);
+    }
+
+    /* Input group for browse button */
+    .input-group {
+      display: flex;
+      gap: 8px;
+    }
+    .btn-browse {
+      padding: 0 16px;
+      background: var(--bg-hover);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      white-space: nowrap;
+      transition: all var(--transition);
+    }
+    .btn-browse:hover {
+      background: var(--border);
+      color: var(--text-primary);
+    }
+
+    /* ═══ Buttons ═══ */
+    .btn-row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 11px 24px;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-family: var(--font);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all var(--transition);
+      outline: none;
+      position: relative;
+      overflow: hidden;
+    }
+    .btn::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: rgba(255,255,255,0);
+      transition: background var(--transition);
+    }
+    .btn:hover::after { background: rgba(255,255,255,0.06); }
+    .btn:active { transform: scale(0.97); }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), #7c6cf0);
+      color: #fff;
+      box-shadow: 0 2px 12px var(--accent-glow);
+    }
+    .btn-primary:hover {
+      box-shadow: 0 4px 20px rgba(108,92,231,0.4);
+    }
+    .btn-secondary {
+      background: var(--bg-hover);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { color: var(--text-primary); }
+    .btn-danger {
+      background: var(--error-bg);
+      color: var(--error);
+      border: 1px solid rgba(231,76,60,0.3);
+    }
+    .btn-danger:hover { background: rgba(231,76,60,0.2); }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
+    /* ═══ Scan Result ═══ */
+    .scan-result {
+      margin-top: 16px;
+      padding: 16px;
+      background: var(--bg-secondary);
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      max-height: 320px;
+      overflow-y: auto;
+    }
+    .scan-result::-webkit-scrollbar { width: 6px; }
+    .scan-result::-webkit-scrollbar-track { background: transparent; }
+    .scan-result::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 3px;
+    }
+    .scan-summary {
+      font-size: 14px;
+      color: var(--accent-light);
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+    .video-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      transition: background var(--transition);
+    }
+    .video-item:hover { background: var(--bg-hover); }
+    .video-item .idx {
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 600;
+      min-width: 28px;
+    }
+    .video-item .vname {
+      color: var(--text-primary);
+      font-weight: 500;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .video-item .vfolder {
+      color: var(--text-muted);
+      font-size: 12px;
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ═══ Progress ═══ */
+    .progress-section {
+      display: none;
+    }
+    .progress-section.visible { display: block; }
+
+    .progress-bar-track {
+      width: 100%;
+      height: 8px;
+      background: var(--bg-input);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 16px;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      background: linear-gradient(90deg, var(--accent), var(--accent-light));
+      width: 0%;
+      transition: width 0.4s ease;
+      position: relative;
+    }
+    .progress-bar-fill::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.15) 50%, transparent 100%);
+      animation: shimmer 1.5s infinite;
+    }
+    @keyframes shimmer {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
+    }
+
+    .progress-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .stat-box {
+      padding: 14px 16px;
+      background: var(--bg-secondary);
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+    }
+    .stat-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 500;
+    }
+    .stat-value {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    .stat-value.accent { color: var(--accent-light); }
+
+    .progress-message {
+      padding: 12px 16px;
+      background: var(--bg-secondary);
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      font-size: 13px;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .progress-message .spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ═══ Status Badge ═══ */
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .status-badge.processing { background: var(--info-bg); color: var(--info); }
+    .status-badge.done       { background: var(--success-bg); color: var(--success); }
+    .status-badge.error      { background: var(--error-bg); color: var(--error); }
+    .status-badge.cancelled  { background: var(--warning-bg); color: var(--warning); }
+    .status-badge.scanning   { background: var(--info-bg); color: var(--info); }
+
+    /* ═══ Summary ═══ */
+    .summary-section {
+      display: none;
+    }
+    .summary-section.visible { display: block; }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+    .summary-cell {
+      text-align: center;
+      padding: 18px;
+      background: var(--bg-secondary);
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+    }
+    .summary-cell .num {
+      font-size: 28px;
+      font-weight: 800;
+    }
+    .summary-cell .label {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .summary-cell.total  .num { color: var(--text-primary); }
+    .summary-cell.done   .num { color: var(--success); }
+    .summary-cell.error  .num { color: var(--error); }
+    .summary-cell.skip   .num { color: var(--warning); }
+
+    /* ═══ Log ═══ */
+    .log-area {
+      margin-top: 16px;
+      padding: 16px;
+      background: var(--bg-primary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      max-height: 200px;
+      overflow-y: auto;
+      font-size: 13px;
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+      color: var(--text-muted);
+      line-height: 1.8;
+    }
+    .log-area::-webkit-scrollbar { width: 6px; }
+    .log-area::-webkit-scrollbar-track { background: transparent; }
+    .log-area::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .log-entry { padding: 1px 0; }
+    .log-entry.info  { color: var(--info); }
+    .log-entry.ok    { color: var(--success); }
+    .log-entry.err   { color: var(--error); }
+    .log-entry.warn  { color: var(--warning); }
+
+    /* ═══ Footer ═══ */
+    .app-footer {
+      text-align: center;
+      margin-top: 48px;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    /* ═══ Responsive ═══ */
+    @media (max-width: 640px) {
+      .app-container { padding: 24px 16px 60px; }
+      .app-header .logo { font-size: 32px; }
+      .progress-stats { grid-template-columns: 1fr; }
+      .summary-grid { grid-template-columns: repeat(2, 1fr); }
+      .btn-row { flex-direction: column; }
+      .btn { justify-content: center; }
+    }
+
+    /* ═══ Settings Row ═══ */
+    .settings-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+      gap: 16px;
+      margin-top: 12px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+    .setting-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .setting-item label {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 500;
+    }
+    .setting-item span {
+      font-size: 14px;
+      color: var(--text-secondary);
+      font-weight: 600;
+    }
+    .setting-item input {
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      padding: 6px 10px;
+      font-size: 13px;
+      width: 100%;
+    }
+    .setting-item input:focus {
+      border-color: var(--accent);
+      outline: none;
+    }
+  </style>
+</head>
+<body>
+
+<div class="app-container">
+  <!-- Header -->
+  <header class="app-header">
+    <h1 class="logo">GetGif</h1>
+    <p class="subtitle">
+      批量扫描视频并导出 GIF
+      <span class="heartbeat-dot" id="heartbeatDot" title="程序在线"></span>
+    </p>
+  </header>
+
+  <!-- Config Card -->
+  <section class="card" id="configCard">
+    <div class="card-title">
+      <span class="icon purple">📂</span>
+      目录配置
+    </div>
+
+    <div class="form-group">
+      <label for="sourceDir">视频文件夹（会扫描子文件夹）</label>
+      <div class="input-group">
+        <input type="text" id="sourceDir" placeholder="例如：D:\Videos\Raw" autocomplete="off">
+        <button class="btn-browse" onclick="browseFolder('sourceDir')">📁 浏览</button>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label for="outputDir">输出文件夹</label>
+      <div class="input-group">
+        <input type="text" id="outputDir" placeholder="例如：D:\Videos\GIFs" autocomplete="off">
+        <button class="btn-browse" onclick="browseFolder('outputDir')">📁 浏览</button>
+      </div>
+    </div>
+
+    <!-- Editable Settings -->
+    <div class="settings-row">
+      <div class="setting-item">
+        <label>跳过片头(秒)</label>
+        <input type="number" id="skip_head" value="30">
+      </div>
+      <div class="setting-item">
+        <label>跳过片尾(秒)</label>
+        <input type="number" id="skip_tail" value="15">
+      </div>
+      <div class="setting-item">
+        <label>每视频张数</label>
+        <input type="number" id="num_gifs" value="16">
+      </div>
+      <div class="setting-item">
+        <label>GIF时长(秒)</label>
+        <input type="number" id="gif_duration" value="5">
+      </div>
+      <div class="setting-item">
+        <label>尺寸模式</label>
+        <select id="scale_mode" onchange="toggleSizeInputs()" style="width:100%; height:32px; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--text-primary); padding:0 8px;">
+          <option value="auto">保持比例</option>
+          <option value="fixed">自定义/拉伸</option>
+        </select>
+      </div>
+      <div class="setting-item">
+        <label>宽度(W)</label>
+        <input type="number" id="gif_width" value="480">
+      </div>
+      <div class="setting-item" id="height_item" style="display:none;">
+        <label>高度(H)</label>
+        <input type="number" id="gif_height" value="0">
+      </div>
+      <div class="setting-item">
+        <label>帧率(FPS)</label>
+        <input type="number" id="gif_fps" value="10">
+      </div>
+      <div class="setting-item" style="justify-content: center;">
+        <label>使用 GPU</label>
+        <div style="display:flex; align-items:center; height:32px;">
+          <input type="checkbox" id="use_gpu" style="width:20px; height:20px; cursor:pointer;">
+        </div>
+      </div>
+      <div class="setting-item" style="justify-content: center;">
+        <label>并行处理</label>
+        <div style="display:flex; align-items:center; height:32px;">
+          <input type="checkbox" id="use_parallel" checked style="width:20px; height:20px; cursor:pointer;">
+        </div>
+      </div>
+    </div>
+
+    <div class="btn-row" style="margin-top:20px;">
+      <button class="btn btn-secondary" id="btnScan" onclick="scanVideos()">🔍 扫描视频</button>
+      <button class="btn btn-primary" id="btnStart" onclick="startTask()">🚀 开始导出</button>
+    </div>
+
+    <!-- Scan result -->
+    <div class="scan-result" id="scanResult" style="display:none;"></div>
+  </section>
+
+  <!-- Progress Card -->
+  <section class="card progress-section" id="progressSection">
+    <div class="card-title">
+      <span class="icon blue">⚡</span>
+      任务进度
+      <span class="status-badge processing" id="statusBadge">运行中</span>
+    </div>
+
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill" id="progressFill"></div>
+    </div>
+
+    <div class="progress-stats">
+      <div class="stat-box">
+        <div class="stat-label">总进度 (预计剩余 <span id="statEta">--:--</span>)</div>
+        <div class="stat-value accent" id="statOverall">0%</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">视频进度</div>
+        <div class="stat-value" id="statVideo">0 / 0</div>
+      </div>
+    </div>
+
+    <div class="progress-message" id="progressMsg">
+      <div class="spinner"></div>
+      <span id="progressText">等待开始...</span>
+    </div>
+
+    <div style="margin-top:16px;">
+      <button class="btn btn-danger" id="btnCancel" onclick="cancelTask()">✖ 取消任务</button>
+    </div>
+
+    <!-- Log Area -->
+    <div class="log-area" id="logArea"></div>
+  </section>
+
+  <!-- Summary Card -->
+  <section class="card summary-section" id="summarySection">
+    <div class="card-title">
+      <span class="icon green">✅</span>
+      本次结果
+    </div>
+    <div class="summary-grid" id="summaryGrid"></div>
+    <div id="summaryActions" style="margin-top:20px; text-align:center; display:none;">
+      <button class="btn btn-primary" onclick="openOutputFolder()">📁 打开输出目录</button>
+    </div>
+  </section>
+
+  <footer class="app-footer">
+    GetGif &mdash; 按文件夹顺序处理视频
+  </footer>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// Application State
+// ═══════════════════════════════════════════════════════════════════
+
+let currentTaskId = null;
+let lastOutputPath = '';
+let heartbeatTimer = null;
+let pollTimer = null;
+let logLines = [];
+let cachedVideoData = null;  // 缓存扫描结果用于实时估算
+let lastScanId = '';
+
+const $ = (id) => document.getElementById(id);
+
+// 页面加载后立即启动全局心跳与加载配置
+window.onload = async () => {
+  startHeartbeat();
+  try {
+    const config = await api('/api/config');
+    if (config.source_dir) $('sourceDir').value = config.source_dir;
+    if (config.output_dir) $('outputDir').value = config.output_dir;
+    if (config.skip_head) $('skip_head').value = config.skip_head;
+    if (config.skip_tail) $('skip_tail').value = config.skip_tail;
+    if (config.num_gifs) $('num_gifs').value = config.num_gifs;
+    if (config.gif_duration) $('gif_duration').value = config.gif_duration;
+    if (config.gif_width !== undefined) $('gif_width').value = config.gif_width;
+    if (config.gif_height !== undefined) $('gif_height').value = config.gif_height;
+    if (config.scale_mode) {
+      $('scale_mode').value = config.scale_mode;
+      toggleSizeInputs();
+    }
+    if (config.gif_fps) $('gif_fps').value = config.gif_fps;
+    if (config.use_gpu !== undefined) $('use_gpu').checked = config.use_gpu;
+    if (config.use_parallel !== undefined) $('use_parallel').checked = config.use_parallel;
+  } catch (e) {}
+};
+
+// ═══ API Helpers ═══
+async function api(url, opts = {}) {
+  const resp = await fetch(url, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  return resp.json();
+}
+
+// ═══ Browse Folder ═══
+async function browseFolder(inputId) {
+  try {
+    const data = await api('/api/browse', { method: 'POST' });
+    if (data.directory) {
+      $(inputId).value = data.directory;
+    }
+  } catch (e) {
+    console.error('Browse failed:', e);
+  }
+}
+
+// ═══ Open Folder ═══
+async function openOutputFolder() {
+  const path = lastOutputPath || $('outputDir').value.trim();
+  if (!path) return;
+  try {
+    await api('/api/open_folder', {
+      method: 'POST',
+      body: JSON.stringify({ path: path }),
+    });
+  } catch (e) {
+    console.error('Open folder failed:', e);
+  }
+}
+
+// ═══ Scan Videos ═══
+async function scanVideos() {
+  const sourceDir = $('sourceDir').value.trim();
+  if (!sourceDir) { alert('请输入视频文件夹'); return; }
+
+  $('btnScan').disabled = true;
+  $('btnScan').textContent = '⏳ 正在扫描...';
+
+  try {
+    const data = await api('/api/scan', {
+      method: 'POST',
+      body: JSON.stringify({ 
+        source_dir: sourceDir,
+      }),
+    });
+
+    const el = $('scanResult');
+    el.style.display = 'block';
+
+    if (data.error) {
+      cachedVideoData = null;
+      lastScanId = '';
+      el.innerHTML = `<div style="color:var(--error)">${data.error}</div>`;
+      return;
+    }
+
+    // 缓存视频数据用于实时估算
+    cachedVideoData = data;
+    lastScanId = data.scan_id || '';
+
+    renderScanResult(data);
+  } catch (e) {
+    alert('扫描失败: ' + e.message);
+  } finally {
+    $('btnScan').disabled = false;
+    $('btnScan').textContent = '🔍 扫描视频';
+  }
+}
+
+// ═══ Start Task ═══
+async function startTask() {
+  const settings = {
+    source_dir: $('sourceDir').value.trim(),
+    output_dir: $('outputDir').value.trim(),
+    scan_id: lastScanId,
+    skip_head: parseInt($('skip_head').value),
+    skip_tail: parseInt($('skip_tail').value),
+    num_gifs: parseInt($('num_gifs').value),
+    gif_duration: parseInt($('gif_duration').value),
+    gif_width: parseInt($('gif_width').value),
+    gif_height: parseInt($('gif_height').value),
+    scale_mode: $('scale_mode').value,
+    gif_fps: parseInt($('gif_fps').value),
+    use_gpu: $('use_gpu').checked,
+    use_parallel: $('use_parallel').checked
+  };
+
+  if (!settings.source_dir) { alert('请输入视频文件夹'); return; }
+  if (!settings.output_dir) { alert('请输入输出文件夹'); return; }
+
+  $('btnStart').disabled = true;
+  $('btnScan').disabled = true;
+
+  try {
+    const data = await api('/api/start', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    });
+
+    if (data.error) {
+      alert(data.error);
+      $('btnStart').disabled = false;
+      $('btnScan').disabled = false;
+      return;
+    }
+
+    currentTaskId = data.task_id;
+    lastOutputPath = settings.output_dir;
+    logLines = [];
+    addLog('info', `任务开始 [${currentTaskId}]`);
+    addLog('info', `输入: ${settings.source_dir}`);
+    addLog('info', `输出: ${settings.output_dir}`);
+
+    // Show progress section
+    $('progressSection').classList.add('visible');
+    $('summarySection').classList.remove('visible');
+
+    // Start heartbeat & polling
+    startHeartbeat();
+    startPolling();
+
+  } catch (e) {
+    alert('启动失败: ' + e.message);
+    $('btnStart').disabled = false;
+    $('btnScan').disabled = false;
+  }
+}
+
+// ═══ Heartbeat ═══
+function startHeartbeat() {
+  $('heartbeatDot').classList.add('active');
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  heartbeatTimer = setInterval(async () => {
+    try {
+      const body = currentTaskId ? { task_id: currentTaskId } : {};
+      await api('/api/heartbeat', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      console.warn('Heartbeat failed:', e);
+    }
+  }, 3000);  // 缩短至3秒，匹配10秒自动退出
+}
+
+function stopHeartbeat() {
+  $('heartbeatDot').classList.remove('active');
+  if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+}
+
+// ═══ Polling ═══
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(pollStatus, 1500);
+}
+
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+async function pollStatus() {
+  if (!currentTaskId) return;
+  try {
+    const data = await api(`/api/status/${currentTaskId}`);
+
+    // Update progress
+    if (data.progress) {
+      const p = data.progress;
+      $('progressFill').style.width = p.overall + '%';
+      $('statOverall').textContent = p.overall + '%';
+      $('statEta').textContent = p.eta;
+      $('statVideo').textContent = `${p.current_video_index} / ${p.total_videos}`;
+
+      if (p.message) {
+        $('progressText').textContent = `[${p.current_video || ''}] ${p.message}`;
+      }
+
+      // Log if new video
+      if (p.video_status === 'done') {
+        addLog('ok', `✓ ${p.current_video} — ${p.message}`);
+      } else if (p.video_status === 'error') {
+        addLog('err', `✗ ${p.current_video} — ${p.message}`);
+      } else if (p.video_status === 'skipped') {
+        addLog('warn', `⊘ ${p.current_video} — ${p.message}`);
+      }
+    }
+
+    // Update status badge
+    updateBadge(data.status);
+
+    // Task finished?
+    if (['done', 'error', 'cancelled', 'timeout'].includes(data.status)) {
+      stopPolling();
+      stopHeartbeat();
+      $('btnStart').disabled = false;
+      $('btnScan').disabled = false;
+
+      // Hide spinner
+      $('progressMsg').querySelector('.spinner').style.display = 'none';
+
+      if (data.status === 'done') {
+        addLog('ok', `═══ 全部完成 ═══`);
+        if (data.summary) showSummary(data.summary);
+      } else if (data.status === 'error') {
+        addLog('err', `任务出错: ${data.error || '未知错误'}`);
+      } else if (data.status === 'cancelled') {
+        addLog('warn', '任务已取消');
+      } else if (data.status === 'timeout') {
+        addLog('warn', '心跳超时，任务已停止');
+      }
+    }
+
+  } catch (e) {
+    console.warn('Poll error:', e);
+  }
+}
+
+function updateBadge(status) {
+  const badge = $('statusBadge');
+  badge.className = 'status-badge ' + status;
+  const labels = {
+    queued: '等待开始', scanning: '查找文件', processing: '运行中',
+    done: '已完成', error: '出错', cancelled: '已取消', timeout: '已断开'
+  };
+  badge.textContent = labels[status] || status;
+}
+
+// ═══ Cancel ═══
+async function cancelTask() {
+  if (!currentTaskId) return;
+  if (!confirm('确定停止当前任务吗？')) return;
+  try {
+    await api('/api/cancel', {
+      method: 'POST',
+      body: JSON.stringify({ task_id: currentTaskId }),
+    });
+    addLog('warn', '正在停止任务...');
+  } catch (e) {
+    console.warn('Cancel error:', e);
+  }
+}
+
+// ═══ Summary ═══
+function showSummary(s) {
+  $('summarySection').classList.add('visible');
+  $('summaryActions').style.display = 'block';
+  $('summaryGrid').innerHTML = `
+    <div class="summary-cell total">
+      <div class="num">${s.total}</div><div class="label">总计</div>
+    </div>
+    <div class="summary-cell done">
+      <div class="num">${s.done}</div><div class="label">成功</div>
+    </div>
+    <div class="summary-cell error">
+      <div class="num">${s.error}</div><div class="label">失败</div>
+    </div>
+    <div class="summary-cell skip">
+      <div class="num">${s.skipped}</div><div class="label">跳过</div>
+    </div>
+  `;
+}
+
+// ═══ Logging ═══
+const logDedup = new Set();
+function addLog(cls, text) {
+  // 简单去重（避免轮询导致重复日志）
+  const key = cls + '|' + text;
+  if (logDedup.has(key)) return;
+  logDedup.add(key);
+  // 限制去重缓存大小
+  if (logDedup.size > 500) {
+    const it = logDedup.values();
+    for (let i = 0; i < 200; i++) { logDedup.delete(it.next().value); }
+  }
+
+  const el = $('logArea');
+  const now = new Date().toLocaleTimeString();
+  const line = document.createElement('div');
+  line.className = 'log-entry ' + cls;
+  line.textContent = `[${now}] ${text}`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+function toggleSizeInputs() {
+  const mode = $('scale_mode').value;
+  $('height_item').style.display = mode === 'fixed' ? 'flex' : 'none';
+  updateEstimate();
+}
+
+// ═══ Real-time Size Estimation ═══
+function estimateSize(data) {
+  const numGifs = parseInt($('num_gifs').value) || 16;
+  const gifDuration = parseInt($('gif_duration').value) || 5;
+  const gifFps = parseInt($('gif_fps').value) || 10;
+  const gifWidth = parseInt($('gif_width').value) || 0;
+  const gifHeight = parseInt($('gif_height').value) || 0;
+  const scaleMode = $('scale_mode').value;
+
+  let totalMB = 0;
+  data.videos.forEach(v => {
+    let w = v.width || 1280;
+    let h = v.height || 720;
+    
+    if (scaleMode === 'auto') {
+      if (gifWidth > 0) {
+        h = Math.round(h * gifWidth / w);
+        w = gifWidth;
+      } else if (gifHeight > 0) {
+        w = Math.round(w * gifHeight / h);
+        h = gifHeight;
+      }
+    } else {
+      // 这里的逻辑稍微改进：如果设为固定尺寸但输入为0，则该维度取原值
+      if (gifWidth > 0) w = gifWidth;
+      if (gifHeight > 0) h = gifHeight;
+    }
+
+    const resFactor = (w * h) / (1280 * 720);
+    const fpsFactor = gifFps / 10;
+    // 使用 2.5 修正系数及基础单位
+    const est = numGifs * gifDuration * 2.5 * resFactor * fpsFactor;
+    totalMB += est;
+  });
+  return (totalMB / 1024).toFixed(2);
+}
+
+function renderScanResult(data) {
+  const el = $('scanResult');
+  const sizeGB = estimateSize(data);
+  
+  let html = `<div style="display:flex; justify-content:space-between; align-items:center;">
+                <div class="scan-summary">共找到 ${data.count} 个视频</div>
+                <div style="font-size:13px; color:var(--text-muted)">预计占用: <span id="estSize" style="color:var(--warning); font-weight:700;">~${sizeGB} GB</span></div>
+              </div>`;
+
+  if (!data.count) {
+    el.innerHTML = `${html}<div style="color:var(--text-secondary); padding:12px 0;">这个文件夹里没有找到可处理的视频。</div>`;
+    return;
+  }
+
+  data.videos.forEach((v, i) => {
+    html += `<div class="video-item">
+      <span class="idx">${i+1}</span>
+      <span class="vname">${v.name}${v.ext}</span>
+      <span style="color:var(--text-muted); font-size:11px; margin-right:10px;">[${v.res}]</span>
+      <span class="vfolder" title="${v.folder}">${v.folder_ctime}</span>
+    </div>`;
+  });
+  el.innerHTML = html;
+}
+
+function updateEstimate() {
+  if (!cachedVideoData) return;
+  const estEl = $('estSize');
+  if (estEl) {
+    estEl.textContent = '~' + estimateSize(cachedVideoData) + ' GB';
+  }
+}
+
+// 设置项变更时实时更新估算
+['num_gifs', 'gif_duration', 'gif_fps', 'gif_width', 'gif_height', 'scale_mode'].forEach(id => {
+  $(id).addEventListener('input', updateEstimate);
+  if (id === 'scale_mode') $(id).addEventListener('change', updateEstimate);
+});
+
+$('sourceDir').addEventListener('input', () => {
+  lastScanId = '';
+  cachedVideoData = null;
+  $('scanResult').style.display = 'none';
+});
+
+// ═══ Page Unload ═══
+window.addEventListener('beforeunload', () => {
+  stopHeartbeat();
+  stopPolling();
+});
+</script>
+
+</body>
+</html>
