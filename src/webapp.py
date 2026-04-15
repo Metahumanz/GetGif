@@ -3,7 +3,7 @@ import threading
 import time
 import webbrowser
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request
 
 from .config import DEFAULT_CONFIG, HOST, PORT, TEMPLATE_DIR
 from .service import GetGifService
@@ -51,6 +51,22 @@ def create_app() -> Flask:
         if status is None:
             return jsonify({"error": "任务不存在"}), 404
         return jsonify(status)
+
+    @app.route("/api/tasks", methods=["GET"])
+    def list_tasks():
+        return jsonify(service.list_task_dashboard())
+
+    @app.route("/api/logs/<task_id>", methods=["GET"])
+    def export_logs(task_id):
+        payload = service.get_task_log_text(task_id)
+        if payload is None:
+            return jsonify({"error": "任务不存在"}), 404
+        text, filename = payload
+        return Response(
+            text,
+            mimetype="text/plain; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     @app.route("/api/cancel", methods=["POST"])
     def cancel_task():

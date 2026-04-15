@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GetGif - 批量导出 GIF</title>
-  <meta name="description" content="批量扫描文件夹中的视频并导出 GIF">
+  <title>GetGif - 批量导出 GIF / 图片</title>
+  <meta name="description" content="批量扫描文件夹中的视频并导出 GIF 或静态图片">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -184,6 +184,11 @@
       box-shadow: 0 0 0 3px var(--accent-glow);
     }
     .form-group input::placeholder {
+      color: var(--text-muted);
+    }
+    .field-hint {
+      margin-top: 6px;
+      font-size: 12px;
       color: var(--text-muted);
     }
 
@@ -414,10 +419,12 @@
       font-size: 12px;
       font-weight: 600;
     }
+    .status-badge.queued     { background: var(--warning-bg); color: var(--warning); }
     .status-badge.processing { background: var(--info-bg); color: var(--info); }
     .status-badge.done       { background: var(--success-bg); color: var(--success); }
     .status-badge.error      { background: var(--error-bg); color: var(--error); }
     .status-badge.cancelled  { background: var(--warning-bg); color: var(--warning); }
+    .status-badge.timeout    { background: var(--warning-bg); color: var(--warning); }
     .status-badge.scanning   { background: var(--info-bg); color: var(--info); }
 
     /* ═══ Summary ═══ */
@@ -478,6 +485,56 @@
     .log-entry.err   { color: var(--error); }
     .log-entry.warn  { color: var(--warning); }
 
+    .task-board {
+      display: grid;
+      gap: 14px;
+    }
+    .task-item-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+    .task-item-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    .task-item-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-primary);
+      word-break: break-all;
+    }
+    .task-item-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+      display: grid;
+      gap: 3px;
+    }
+    .task-item-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+    }
+    .btn-ghost:hover {
+      color: var(--text-primary);
+      border-color: rgba(108,92,231,0.35);
+    }
+    .empty-note {
+      font-size: 13px;
+      color: var(--text-muted);
+      padding: 12px 0;
+    }
+
     /* ═══ Footer ═══ */
     .app-footer {
       text-align: center;
@@ -496,6 +553,7 @@
       .summary-grid { grid-template-columns: repeat(2, 1fr); }
       .btn-row { flex-direction: column; }
       .btn { justify-content: center; }
+      .task-item-head { flex-direction: column; }
     }
 
     /* ═══ Settings Row ═══ */
@@ -524,7 +582,8 @@
       color: var(--text-secondary);
       font-weight: 600;
     }
-    .setting-item input {
+    .setting-item input,
+    .setting-item select {
       background: var(--bg-input);
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
@@ -533,7 +592,8 @@
       font-size: 13px;
       width: 100%;
     }
-    .setting-item input:focus {
+    .setting-item input:focus,
+    .setting-item select:focus {
       border-color: var(--accent);
       outline: none;
     }
@@ -546,7 +606,7 @@
   <header class="app-header">
     <h1 class="logo">GetGif</h1>
     <p class="subtitle">
-      批量扫描视频并导出 GIF
+      批量扫描视频并导出 GIF / 静态图片
       <span class="heartbeat-dot" id="heartbeatDot" title="程序在线"></span>
     </p>
   </header>
@@ -574,6 +634,12 @@
       </div>
     </div>
 
+    <div class="form-group">
+      <label for="outputNameTemplate">输出命名模板</label>
+      <input type="text" id="outputNameTemplate" placeholder="{video_name}_{index2}" autocomplete="off">
+      <div class="field-hint">可用变量：{video_name} {index} {index2} {index3} {mode} {format}，无需手动填写扩展名。</div>
+    </div>
+
     <!-- Editable Settings -->
     <div class="settings-row">
       <div class="setting-item">
@@ -589,12 +655,26 @@
         <input type="number" id="num_gifs" value="16">
       </div>
       <div class="setting-item">
+        <label>导出类型</label>
+        <select id="export_mode" onchange="syncFormState()">
+          <option value="gif">GIF 动图</option>
+          <option value="image">静态图片</option>
+        </select>
+      </div>
+      <div class="setting-item" id="image_format_item" style="display:none;">
+        <label>图片格式</label>
+        <select id="image_format">
+          <option value="png">PNG</option>
+          <option value="jpg">JPG</option>
+        </select>
+      </div>
+      <div class="setting-item" id="gif_duration_item">
         <label>GIF时长(秒)</label>
         <input type="number" id="gif_duration" value="5">
       </div>
       <div class="setting-item">
         <label>尺寸模式</label>
-        <select id="scale_mode" onchange="toggleSizeInputs()" style="width:100%; height:32px; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--text-primary); padding:0 8px;">
+        <select id="scale_mode" onchange="syncFormState()" style="height:32px;">
           <option value="auto">保持比例</option>
           <option value="fixed">自定义/拉伸</option>
         </select>
@@ -607,7 +687,7 @@
         <label>高度(H)</label>
         <input type="number" id="gif_height" value="0">
       </div>
-      <div class="setting-item">
+      <div class="setting-item" id="gif_fps_item">
         <label>帧率(FPS)</label>
         <input type="number" id="gif_fps" value="10">
       </div>
@@ -664,6 +744,7 @@
 
     <div style="margin-top:16px;">
       <button class="btn btn-danger" id="btnCancel" onclick="cancelTask()">✖ 取消任务</button>
+      <button class="btn btn-secondary" onclick="downloadLogs()">📝 导出日志</button>
     </div>
 
     <!-- Log Area -->
@@ -679,6 +760,24 @@
     <div class="summary-grid" id="summaryGrid"></div>
     <div id="summaryActions" style="margin-top:20px; text-align:center; display:none;">
       <button class="btn btn-primary" onclick="openOutputFolder()">📁 打开输出目录</button>
+      <button class="btn btn-secondary" onclick="downloadLogs()">📝 导出日志</button>
+    </div>
+  </section>
+
+  <section class="card" id="taskBoardSection">
+    <div class="card-title">
+      <span class="icon blue">🗂️</span>
+      队列与历史
+    </div>
+    <div class="task-board">
+      <div>
+        <div class="scan-summary">当前队列</div>
+        <div id="queueBoard"></div>
+      </div>
+      <div>
+        <div class="scan-summary">历史记录</div>
+        <div id="historyBoard"></div>
+      </div>
     </div>
   </section>
 
@@ -696,11 +795,28 @@ let currentTaskId = null;
 let lastOutputPath = '';
 let heartbeatTimer = null;
 let pollTimer = null;
-let logLines = [];
+let dashboardTimer = null;
 let cachedVideoData = null;  // 缓存扫描结果用于实时估算
 let lastScanId = '';
 
 const $ = (id) => document.getElementById(id);
+
+function getOutputTypeLabel(exportMode, imageFormat) {
+  return exportMode === 'image' ? `${imageFormat.toUpperCase()} 静态图` : 'GIF 动图';
+}
+
+function getStatusLabel(status) {
+  const labels = {
+    queued: '等待开始',
+    scanning: '查找文件',
+    processing: '运行中',
+    done: '已完成',
+    error: '出错',
+    cancelled: '已取消',
+    timeout: '已断开'
+  };
+  return labels[status] || status;
+}
 
 // 页面加载后立即启动全局心跳与加载配置
 window.onload = async () => {
@@ -712,17 +828,20 @@ window.onload = async () => {
     if (config.skip_head) $('skip_head').value = config.skip_head;
     if (config.skip_tail) $('skip_tail').value = config.skip_tail;
     if (config.num_gifs) $('num_gifs').value = config.num_gifs;
+    if (config.export_mode) $('export_mode').value = config.export_mode;
+    if (config.image_format) $('image_format').value = config.image_format;
+    if (config.output_name_template) $('outputNameTemplate').value = config.output_name_template;
     if (config.gif_duration) $('gif_duration').value = config.gif_duration;
     if (config.gif_width !== undefined) $('gif_width').value = config.gif_width;
     if (config.gif_height !== undefined) $('gif_height').value = config.gif_height;
-    if (config.scale_mode) {
-      $('scale_mode').value = config.scale_mode;
-      toggleSizeInputs();
-    }
+    if (config.scale_mode) $('scale_mode').value = config.scale_mode;
     if (config.gif_fps) $('gif_fps').value = config.gif_fps;
     if (config.use_gpu !== undefined) $('use_gpu').checked = config.use_gpu;
     if (config.use_parallel !== undefined) $('use_parallel').checked = config.use_parallel;
   } catch (e) {}
+  syncFormState();
+  refreshTaskDashboard();
+  startDashboardRefresh();
 };
 
 // ═══ API Helpers ═══
@@ -808,6 +927,9 @@ async function startTask() {
     skip_head: parseInt($('skip_head').value),
     skip_tail: parseInt($('skip_tail').value),
     num_gifs: parseInt($('num_gifs').value),
+    export_mode: $('export_mode').value,
+    image_format: $('image_format').value,
+    output_name_template: $('outputNameTemplate').value.trim(),
     gif_duration: parseInt($('gif_duration').value),
     gif_width: parseInt($('gif_width').value),
     gif_height: parseInt($('gif_height').value),
@@ -838,10 +960,17 @@ async function startTask() {
 
     currentTaskId = data.task_id;
     lastOutputPath = settings.output_dir;
-    logLines = [];
+    logDedup.clear();
+    $('logArea').innerHTML = '';
+    $('progressMsg').querySelector('.spinner').style.display = '';
     addLog('info', `任务开始 [${currentTaskId}]`);
     addLog('info', `输入: ${settings.source_dir}`);
     addLog('info', `输出: ${settings.output_dir}`);
+    addLog('info', `格式: ${getOutputTypeLabel(settings.export_mode, settings.image_format)}`);
+    addLog('info', `命名模板: ${settings.output_name_template || '{video_name}_{index2}'}`);
+    if (data.queue_position) {
+      addLog('info', `已加入队列，排队位置: ${data.queue_position}`);
+    }
 
     // Show progress section
     $('progressSection').classList.add('visible');
@@ -850,6 +979,7 @@ async function startTask() {
     // Start heartbeat & polling
     startHeartbeat();
     startPolling();
+    refreshTaskDashboard();
 
   } catch (e) {
     alert('启动失败: ' + e.message);
@@ -915,10 +1045,17 @@ async function pollStatus() {
       } else if (p.video_status === 'skipped') {
         addLog('warn', `⊘ ${p.current_video} — ${p.message}`);
       }
+    } else if (data.status === 'queued') {
+      $('progressFill').style.width = '0%';
+      $('statOverall').textContent = '0%';
+      $('statEta').textContent = '--:--';
+      $('statVideo').textContent = '0 / 0';
+      $('progressText').textContent = data.queue_position ? `排队中，前面还有 ${data.queue_position - 1} 个任务` : '排队中，等待开始...';
     }
 
     // Update status badge
     updateBadge(data.status);
+    refreshTaskDashboard();
 
     // Task finished?
     if (['done', 'error', 'cancelled', 'timeout'].includes(data.status)) {
@@ -940,6 +1077,8 @@ async function pollStatus() {
       } else if (data.status === 'timeout') {
         addLog('warn', '心跳超时，任务已停止');
       }
+
+      refreshTaskDashboard();
     }
 
   } catch (e) {
@@ -950,11 +1089,7 @@ async function pollStatus() {
 function updateBadge(status) {
   const badge = $('statusBadge');
   badge.className = 'status-badge ' + status;
-  const labels = {
-    queued: '等待开始', scanning: '查找文件', processing: '运行中',
-    done: '已完成', error: '出错', cancelled: '已取消', timeout: '已断开'
-  };
-  badge.textContent = labels[status] || status;
+  badge.textContent = getStatusLabel(status);
 }
 
 // ═══ Cancel ═══
@@ -967,6 +1102,7 @@ async function cancelTask() {
       body: JSON.stringify({ task_id: currentTaskId }),
     });
     addLog('warn', '正在停止任务...');
+    refreshTaskDashboard();
   } catch (e) {
     console.warn('Cancel error:', e);
   }
@@ -992,6 +1128,110 @@ function showSummary(s) {
   `;
 }
 
+function escapeHtml(text) {
+  return String(text ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function formatDateTime(value) {
+  if (!value) return '--';
+  return value.replace('T', ' ');
+}
+
+async function downloadLogs(taskId = currentTaskId) {
+  if (!taskId) return;
+  try {
+    const resp = await fetch(`/api/logs/${taskId}`);
+    if (!resp.ok) throw new Error('日志导出失败');
+    const blob = await resp.blob();
+    const disposition = resp.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename="([^"]+)"/);
+    const filename = match ? match[1] : `getgif_${taskId}.log.txt`;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert('日志导出失败: ' + e.message);
+  }
+}
+
+async function openSpecificFolder(path) {
+  if (!path) return;
+  try {
+    await api('/api/open_folder', {
+      method: 'POST',
+      body: JSON.stringify({ path: path }),
+    });
+  } catch (e) {
+    console.error('Open folder failed:', e);
+  }
+}
+
+function renderTaskCard(item, showActions = false) {
+  const summary = item.summary
+    ? `成功 ${item.summary.done} / 失败 ${item.summary.error} / 跳过 ${item.summary.skipped}`
+    : '尚无结果汇总';
+  const queueText = item.queue_position ? `队列位置：${item.queue_position}` : `状态：${getStatusLabel(item.status)}`;
+  const actions = showActions ? `
+    <div class="task-item-actions">
+      <button class="btn btn-ghost" onclick="downloadLogs('${item.id}')">📝 导出日志</button>
+      <button class="btn btn-ghost" onclick="openSpecificFolder(decodeURIComponent('${encodeURIComponent(item.output_dir || '')}'))">📁 打开输出</button>
+    </div>
+  ` : '';
+
+  return `
+    <div class="task-item-card">
+      <div class="task-item-head">
+        <div>
+          <div class="task-item-title">${escapeHtml(item.id)} · ${escapeHtml(getOutputTypeLabel(item.export_mode, item.image_format))}</div>
+          <div class="task-item-meta">
+            <div>${escapeHtml(queueText)}</div>
+            <div>创建时间：${escapeHtml(formatDateTime(item.created_at))}</div>
+            <div>输出模板：${escapeHtml(item.output_name_template || '{video_name}_{index2}')}</div>
+            <div>输出目录：${escapeHtml(item.output_dir || '--')}</div>
+            <div>${escapeHtml(summary)}</div>
+          </div>
+        </div>
+        <span class="status-badge ${escapeHtml(item.status)}">${escapeHtml(getStatusLabel(item.status))}</span>
+      </div>
+      ${actions}
+    </div>
+  `;
+}
+
+function renderTaskDashboard(data) {
+  const queueItems = [];
+  if (data.current) queueItems.push(renderTaskCard(data.current, true));
+  (data.queue || []).forEach(item => queueItems.push(renderTaskCard(item, true)));
+  $('queueBoard').innerHTML = queueItems.length ? queueItems.join('') : '<div class="empty-note">当前没有排队中的任务。</div>';
+
+  const historyItems = (data.history || []).slice(0, 12).map(item => renderTaskCard(item, true));
+  $('historyBoard').innerHTML = historyItems.length ? historyItems.join('') : '<div class="empty-note">还没有历史记录。</div>';
+}
+
+async function refreshTaskDashboard() {
+  try {
+    const data = await api('/api/tasks');
+    renderTaskDashboard(data);
+  } catch (e) {
+    console.warn('Task dashboard failed:', e);
+  }
+}
+
+function startDashboardRefresh() {
+  if (dashboardTimer) clearInterval(dashboardTimer);
+  dashboardTimer = setInterval(refreshTaskDashboard, 3000);
+}
+
 // ═══ Logging ═══
 const logDedup = new Set();
 function addLog(cls, text) {
@@ -1014,15 +1254,23 @@ function addLog(cls, text) {
   el.scrollTop = el.scrollHeight;
 }
 
-function toggleSizeInputs() {
-  const mode = $('scale_mode').value;
-  $('height_item').style.display = mode === 'fixed' ? 'flex' : 'none';
+function syncFormState() {
+  const scaleMode = $('scale_mode').value;
+  const exportMode = $('export_mode').value;
+  const isImage = exportMode === 'image';
+
+  $('height_item').style.display = scaleMode === 'fixed' ? 'flex' : 'none';
+  $('image_format_item').style.display = isImage ? 'flex' : 'none';
+  $('gif_duration_item').style.display = isImage ? 'none' : 'flex';
+  $('gif_fps_item').style.display = isImage ? 'none' : 'flex';
   updateEstimate();
 }
 
 // ═══ Real-time Size Estimation ═══
 function estimateSize(data) {
-  const numGifs = parseInt($('num_gifs').value) || 16;
+  const numOutputs = parseInt($('num_gifs').value) || 16;
+  const exportMode = $('export_mode').value;
+  const imageFormat = $('image_format').value;
   const gifDuration = parseInt($('gif_duration').value) || 5;
   const gifFps = parseInt($('gif_fps').value) || 10;
   const gifWidth = parseInt($('gif_width').value) || 0;
@@ -1049,9 +1297,17 @@ function estimateSize(data) {
     }
 
     const resFactor = (w * h) / (1280 * 720);
-    const fpsFactor = gifFps / 10;
-    // 使用 2.5 修正系数及基础单位
-    const est = numGifs * gifDuration * 2.5 * resFactor * fpsFactor;
+    let est = 0;
+
+    if (exportMode === 'image') {
+      const perImageMB = imageFormat === 'png' ? 0.55 : 0.18;
+      est = numOutputs * perImageMB * resFactor;
+    } else {
+      const fpsFactor = gifFps / 10;
+      // GIF 估算偏粗略，使用分辨率、时长和帧率做线性近似
+      est = numOutputs * gifDuration * 2.5 * resFactor * fpsFactor;
+    }
+
     totalMB += est;
   });
   return (totalMB / 1024).toFixed(2);
@@ -1091,9 +1347,11 @@ function updateEstimate() {
 }
 
 // 设置项变更时实时更新估算
-['num_gifs', 'gif_duration', 'gif_fps', 'gif_width', 'gif_height', 'scale_mode'].forEach(id => {
+['num_gifs', 'gif_duration', 'gif_fps', 'gif_width', 'gif_height', 'scale_mode', 'export_mode', 'image_format'].forEach(id => {
   $(id).addEventListener('input', updateEstimate);
-  if (id === 'scale_mode') $(id).addEventListener('change', updateEstimate);
+  if (['scale_mode', 'export_mode', 'image_format'].includes(id)) {
+    $(id).addEventListener('change', updateEstimate);
+  }
 });
 
 $('sourceDir').addEventListener('input', () => {
@@ -1106,6 +1364,7 @@ $('sourceDir').addEventListener('input', () => {
 window.addEventListener('beforeunload', () => {
   stopHeartbeat();
   stopPolling();
+  if (dashboardTimer) clearInterval(dashboardTimer);
 });
 </script>
 

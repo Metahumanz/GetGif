@@ -12,6 +12,7 @@ __pycache__/
 .python-version
 
 settings.json
+task_history.json
 dxdiag_output.txt
 
 .pytest_cache/
