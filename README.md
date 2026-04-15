@@ -181,9 +181,9 @@ http://127.0.0.1:6543
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0.
+本项目按照GNU General Public License v3.0协议开源。
 
-See [LICENSE](LICENSE) for the full license text.
+点击[LICENSE](LICENSE)查看协议全文。
 
 ## 后续可改进方向
 
