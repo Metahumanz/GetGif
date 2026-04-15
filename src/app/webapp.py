@@ -5,7 +5,7 @@ import webbrowser
 
 from flask import Flask, Response, jsonify, render_template, request
 
-from .config import DEFAULT_CONFIG, HOST, PORT, TEMPLATE_DIR
+from ..core.config import DEFAULT_CONFIG, HOST, PORT, TEMPLATE_DIR
 from .service import GetGifService
 
 
@@ -65,7 +65,7 @@ def create_app() -> Flask:
         return Response(
             text,
             mimetype="text/plain; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
         )
 
     @app.route("/api/cancel", methods=["POST"])

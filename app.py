@@ -1,4 +1,4 @@
-from src import create_app, run_app
+from src.app.webapp import create_app, run_app
 
 
 app = create_app()

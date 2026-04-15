@@ -43,7 +43,7 @@ if %errorlevel% neq 0 (
 
 :: 4. Start App
 echo [INFO] Starting app.py...
-echo [INFO] Backend modules are loaded from src\.
+echo [INFO] Backend modules are organized under src\app, src\runtime, src\stores, src\media, src\platform, src\core.
 echo [INFO] Do not close this window while using the app.
 echo.
 %PYTHON_EXE% app.py
