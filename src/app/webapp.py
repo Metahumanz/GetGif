@@ -38,7 +38,17 @@ def create_app() -> Flask:
         if not os.path.isdir(source_dir):
             return jsonify({"error": f"源目录不存在: {source_dir}"}), 400
 
-        return jsonify(service.create_task(source_dir, output_dir, data, scan_id))
+        try:
+            return jsonify(service.create_task(source_dir, output_dir, data, scan_id))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+    @app.route("/api/encoders", methods=["GET"])
+    def list_encoders():
+        try:
+            return jsonify(service.get_encoder_catalog())
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
 
     @app.route("/api/heartbeat", methods=["POST"])
     def heartbeat():

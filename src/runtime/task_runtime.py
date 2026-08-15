@@ -2,6 +2,12 @@ import os
 import traceback
 
 from ..core.config import DEFAULT_CONFIG
+from ..media.encoder_catalog import (
+    get_encoder_catalog,
+    normalize_video_codec,
+    normalize_video_encoder,
+    resolve_encoder,
+)
 from ..media.video_pipeline import (
     collect_scan_results,
     discover_videos,
@@ -89,10 +95,15 @@ class TaskRuntime:
         task_params = {**DEFAULT_CONFIG, **params}
         task_params["export_mode"] = normalize_export_mode(task_params.get("export_mode", "gif"))
         task_params["image_format"] = normalize_image_format(task_params.get("image_format", "png"))
+        task_params["video_codec"] = normalize_video_codec(task_params.get("video_codec", "h264"))
+        task_params["video_encoder"] = normalize_video_encoder(task_params.get("video_encoder", "auto"))
         task_params["output_name_template"] = (
             str(task_params.get("output_name_template", DEFAULT_CONFIG["output_name_template"])).strip()
             or DEFAULT_CONFIG["output_name_template"]
         )
+        if task_params["export_mode"] == "mp4":
+            # 提前校验编码器，避免任务跑到一半才发现编码器不可用
+            resolve_encoder(task_params["video_codec"], task_params["video_encoder"], get_encoder_catalog())
         return self.state_store.create_task(source_dir, output_dir, task_params, cached_videos)
 
     def get_task_status(self, task_id: str) -> dict | None:

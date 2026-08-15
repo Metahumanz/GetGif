@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GetGif - 批量导出 GIF / 图片</title>
-  <meta name="description" content="批量扫描文件夹中的视频并导出 GIF 或静态图片">
+  <title>GetGif - 批量导出 GIF / 图片 / MP4</title>
+  <meta name="description" content="批量扫描文件夹中的视频并导出 GIF、静态图片或 MP4">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -606,7 +606,7 @@
   <header class="app-header">
     <h1 class="logo">GetGif</h1>
     <p class="subtitle">
-      批量扫描视频并导出 GIF / 静态图片
+      批量扫描视频并导出 GIF / 图片 / MP4
       <span class="heartbeat-dot" id="heartbeatDot" title="程序在线"></span>
     </p>
   </header>
@@ -651,7 +651,7 @@
         <input type="number" id="skip_tail" value="15">
       </div>
       <div class="setting-item">
-        <label>每视频张数</label>
+        <label id="numGifsLabel">每视频输出数</label>
         <input type="number" id="num_gifs" value="16">
       </div>
       <div class="setting-item">
@@ -659,6 +659,7 @@
         <select id="export_mode" onchange="syncFormState()">
           <option value="gif">GIF 动图</option>
           <option value="image">静态图片</option>
+          <option value="mp4">MP4 视频</option>
         </select>
       </div>
       <div class="setting-item" id="image_format_item" style="display:none;">
@@ -668,8 +669,22 @@
           <option value="jpg">JPG</option>
         </select>
       </div>
+      <div class="setting-item" id="video_codec_item" style="display:none;">
+        <label>视频编码</label>
+        <select id="video_codec" onchange="onCodecChange()">
+          <option value="h264">H.264 (AVC)</option>
+          <option value="h265">H.265 (HEVC)</option>
+        </select>
+      </div>
+      <div class="setting-item" id="video_encoder_item" style="display:none;">
+        <label>编码器</label>
+        <select id="video_encoder">
+          <option value="auto">正在检测本机编码器…</option>
+        </select>
+        <div class="field-hint">“自动”优先使用本机可用的硬件编码器。MP4 导出不含音频。</div>
+      </div>
       <div class="setting-item" id="gif_duration_item">
-        <label>GIF时长(秒)</label>
+        <label id="durationLabel">GIF时长(秒)</label>
         <input type="number" id="gif_duration" value="5">
       </div>
       <div class="setting-item">
@@ -692,7 +707,7 @@
         <input type="number" id="gif_fps" value="10">
       </div>
       <div class="setting-item" style="justify-content: center;">
-        <label>使用 GPU</label>
+        <label>GPU 解码加速</label>
         <div style="display:flex; align-items:center; height:32px;">
           <input type="checkbox" id="use_gpu" style="width:20px; height:20px; cursor:pointer;">
         </div>
@@ -798,11 +813,16 @@ let pollTimer = null;
 let dashboardTimer = null;
 let cachedVideoData = null;  // 缓存扫描结果用于实时估算
 let lastScanId = '';
+let encoderCatalog = null;      // /api/encoders 返回的编码器目录
+let pendingEncoderValue = 'auto';  // 想恢复的编码器选择（受编码标准限制）
 
 const $ = (id) => document.getElementById(id);
 
-function getOutputTypeLabel(exportMode, imageFormat) {
-  return exportMode === 'image' ? `${imageFormat.toUpperCase()} 静态图` : 'GIF 动图';
+function getOutputTypeLabel(item) {
+  const mode = (item && item.export_mode) || 'gif';
+  if (mode === 'image') return `${((item && item.image_format) || 'png').toUpperCase()} 静态图`;
+  if (mode === 'mp4') return `MP4 视频 · ${((item && item.video_codec) || 'h264').toUpperCase()} · ${(item && item.video_encoder) || 'auto'}`;
+  return 'GIF 动图';
 }
 
 function getStatusLabel(status) {
@@ -830,6 +850,8 @@ window.onload = async () => {
     if (config.num_gifs) $('num_gifs').value = config.num_gifs;
     if (config.export_mode) $('export_mode').value = config.export_mode;
     if (config.image_format) $('image_format').value = config.image_format;
+    if (config.video_codec) $('video_codec').value = config.video_codec;
+    if (config.video_encoder) pendingEncoderValue = config.video_encoder;
     if (config.output_name_template) $('outputNameTemplate').value = config.output_name_template;
     if (config.gif_duration) $('gif_duration').value = config.gif_duration;
     if (config.gif_width !== undefined) $('gif_width').value = config.gif_width;
@@ -863,6 +885,65 @@ async function browseFolder(inputId) {
   } catch (e) {
     console.error('Browse failed:', e);
   }
+}
+
+// ═══ Encoder Catalog ═══
+// 首次请求 /api/encoders 时后端会对本机硬件编码器做试编码，可能需要几秒
+async function loadEncoderCatalog() {
+  const sel = $('video_encoder');
+  sel.innerHTML = '<option value="auto">正在检测本机编码器…</option>';
+  try {
+    encoderCatalog = await api('/api/encoders');
+  } catch (e) {
+    console.warn('Encoder catalog failed:', e);
+    encoderCatalog = null;
+  }
+  populateEncoderSelect();
+}
+
+function populateEncoderSelect() {
+  const sel = $('video_encoder');
+  const codec = $('video_codec').value || 'h264';
+  const list = (encoderCatalog && encoderCatalog.encoders)
+    ? encoderCatalog.encoders.filter(e => e.codec === codec)
+    : [];
+
+  let html = '<option value="auto">自动（优先硬件，不可用则软件）</option>';
+
+  const software = list.filter(e => e.kind === 'software' && e.available);
+  const hardware = list.filter(e => e.kind === 'hardware' && e.available);
+  const unavailable = list.filter(e => !e.available);
+
+  if (software.length) {
+    html += '<optgroup label="软件编码">'
+      + software.map(e => `<option value="${e.name}">${e.label}</option>`).join('')
+      + '</optgroup>';
+  }
+  if (hardware.length) {
+    html += '<optgroup label="硬件编码（本机可用）">'
+      + hardware.map(e => `<option value="${e.name}">${e.label}</option>`).join('')
+      + '</optgroup>';
+  }
+  if (unavailable.length) {
+    html += '<optgroup label="不可用">'
+      + unavailable.map(e => `<option value="${e.name}" disabled>${e.label}</option>`).join('')
+      + '</optgroup>';
+  }
+  if (!list.length) {
+    html += '<option value="auto">未检测到编码器，将使用软件编码</option>';
+  }
+  sel.innerHTML = html;
+
+  if ([...sel.options].some(o => o.value === pendingEncoderValue && !o.disabled)) {
+    sel.value = pendingEncoderValue;
+  }
+}
+
+function onCodecChange() {
+  const current = $('video_encoder').value;
+  if (current) pendingEncoderValue = current;
+  populateEncoderSelect();
+  updateEstimate();
 }
 
 // ═══ Open Folder ═══
@@ -929,6 +1010,8 @@ async function startTask() {
     num_gifs: parseInt($('num_gifs').value),
     export_mode: $('export_mode').value,
     image_format: $('image_format').value,
+    video_codec: $('video_codec').value,
+    video_encoder: $('video_encoder').value || 'auto',
     output_name_template: $('outputNameTemplate').value.trim(),
     gif_duration: parseInt($('gif_duration').value),
     gif_width: parseInt($('gif_width').value),
@@ -966,7 +1049,7 @@ async function startTask() {
     addLog('info', `任务开始 [${currentTaskId}]`);
     addLog('info', `输入: ${settings.source_dir}`);
     addLog('info', `输出: ${settings.output_dir}`);
-    addLog('info', `格式: ${getOutputTypeLabel(settings.export_mode, settings.image_format)}`);
+    addLog('info', `格式: ${getOutputTypeLabel(settings)}`);
     addLog('info', `命名模板: ${settings.output_name_template || '{video_name}_{index2}'}`);
     if (data.queue_position) {
       addLog('info', `已加入队列，排队位置: ${data.queue_position}`);
@@ -1192,7 +1275,7 @@ function renderTaskCard(item, showActions = false) {
     <div class="task-item-card">
       <div class="task-item-head">
         <div>
-          <div class="task-item-title">${escapeHtml(item.id)} · ${escapeHtml(getOutputTypeLabel(item.export_mode, item.image_format))}</div>
+          <div class="task-item-title">${escapeHtml(item.id)} · ${escapeHtml(getOutputTypeLabel(item))}</div>
           <div class="task-item-meta">
             <div>${escapeHtml(queueText)}</div>
             <div>创建时间：${escapeHtml(formatDateTime(item.created_at))}</div>
@@ -1258,11 +1341,17 @@ function syncFormState() {
   const scaleMode = $('scale_mode').value;
   const exportMode = $('export_mode').value;
   const isImage = exportMode === 'image';
+  const isMp4 = exportMode === 'mp4';
 
   $('height_item').style.display = scaleMode === 'fixed' ? 'flex' : 'none';
   $('image_format_item').style.display = isImage ? 'flex' : 'none';
+  $('video_codec_item').style.display = isMp4 ? 'flex' : 'none';
+  $('video_encoder_item').style.display = isMp4 ? 'flex' : 'none';
   $('gif_duration_item').style.display = isImage ? 'none' : 'flex';
   $('gif_fps_item').style.display = isImage ? 'none' : 'flex';
+  $('durationLabel').textContent = isMp4 ? '片段时长(秒)' : 'GIF时长(秒)';
+  $('numGifsLabel').textContent = isMp4 ? '每视频片段数' : '每视频张数';
+  if (isMp4 && !encoderCatalog) loadEncoderCatalog();
   updateEstimate();
 }
 
@@ -1302,6 +1391,12 @@ function estimateSize(data) {
     if (exportMode === 'image') {
       const perImageMB = imageFormat === 'png' ? 0.55 : 0.18;
       est = numOutputs * perImageMB * resFactor;
+    } else if (exportMode === 'mp4') {
+      // 粗略按码率估算：1080p 约 H.264≈10Mbps / H.265≈6Mbps，帧率线性缩放
+      const codec = $('video_codec').value || 'h264';
+      const fpsFactor = Math.min(2, Math.max(0.5, gifFps / 15));
+      const mbps = (codec === 'h265' ? 6 : 10) * resFactor * fpsFactor;
+      est = numOutputs * gifDuration * mbps / 8;
     } else {
       const fpsFactor = gifFps / 10;
       // GIF 估算偏粗略，使用分辨率、时长和帧率做线性近似
@@ -1347,7 +1442,7 @@ function updateEstimate() {
 }
 
 // 设置项变更时实时更新估算
-['num_gifs', 'gif_duration', 'gif_fps', 'gif_width', 'gif_height', 'scale_mode', 'export_mode', 'image_format'].forEach(id => {
+['num_gifs', 'gif_duration', 'gif_fps', 'gif_width', 'gif_height', 'scale_mode', 'export_mode', 'image_format', 'video_codec'].forEach(id => {
   $(id).addEventListener('input', updateEstimate);
   if (['scale_mode', 'export_mode', 'image_format'].includes(id)) {
     $(id).addEventListener('change', updateEstimate);

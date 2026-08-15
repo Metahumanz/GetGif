@@ -25,6 +25,8 @@ DEFAULT_CONFIG = {
     "num_gifs": 16,
     "export_mode": "gif",
     "image_format": "png",
+    "video_codec": "h264",
+    "video_encoder": "auto",
     "output_name_template": "{video_name}_{index2}",
     "gif_duration": 5,
     "gif_fps": 10,

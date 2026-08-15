@@ -7,12 +7,8 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-import imageio_ffmpeg
-
 from ..core.config import DEFAULT_CONFIG, VIDEO_EXTENSIONS
-
-
-FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
+from .encoder_catalog import FFMPEG_PATH, get_encoder_catalog, resolve_encoder
 
 
 def get_folder_creation_time(folder_path: str) -> float:
@@ -43,7 +39,12 @@ def summarize_ffmpeg_error(stderr_text: str) -> str:
 
 
 def normalize_export_mode(value: str) -> str:
-    return "image" if str(value).lower() == "image" else "gif"
+    lowered = str(value or "gif").lower()
+    if lowered == "image":
+        return "image"
+    if lowered == "mp4":
+        return "mp4"
+    return "gif"
 
 
 def normalize_image_format(value: str) -> str:
@@ -183,6 +184,8 @@ def extract_outputs(
     p_output_count = params.get("num_gifs", 16)
     p_export_mode = normalize_export_mode(params.get("export_mode", "gif"))
     p_image_format = normalize_image_format(params.get("image_format", "png"))
+    p_video_codec = params.get("video_codec", "h264")
+    p_video_encoder = params.get("video_encoder", "auto")
     p_name_template = params.get("output_name_template", DEFAULT_CONFIG["output_name_template"])
     p_duration = params.get("gif_duration", 5)
     p_fps = params.get("gif_fps", 10)
@@ -191,7 +194,18 @@ def extract_outputs(
     p_scale_mode = params.get("scale_mode", "auto")
     p_use_gpu = params.get("use_gpu", False)
     p_use_parallel = params.get("use_parallel", True)
-    output_label = "GIF" if p_export_mode == "gif" else p_image_format.upper()
+
+    if p_export_mode == "gif":
+        output_label = "GIF"
+    elif p_export_mode == "mp4":
+        output_label = "MP4"
+    else:
+        output_label = p_image_format.upper()
+
+    encoder_def = None
+    if p_export_mode == "mp4":
+        # 解析编码器（auto / 具体名称），失败时抛出异常并作为该视频的错误结果
+        encoder_def = resolve_encoder(p_video_codec, p_video_encoder, get_encoder_catalog())
 
     result = {
         "video": video_path,
@@ -207,7 +221,7 @@ def extract_outputs(
 
     try:
         if p_output_count <= 0:
-            raise ValueError("每视频张数必须大于 0")
+            raise ValueError("每视频输出数量必须大于 0")
 
         v_info = get_video_info(video_path)
         duration = v_info["duration"]
@@ -223,7 +237,7 @@ def extract_outputs(
         if end_time <= start_time:
             start_time = 0
             end_time = duration
-            if p_export_mode == "gif" and end_time <= p_duration:
+            if p_export_mode in {"gif", "mp4"} and end_time <= p_duration:
                 result["status"] = "skipped"
                 result["error"] = f"视频时长太短 ({duration:.1f}秒)"
                 on_progress("skipped", result["error"])
@@ -234,7 +248,12 @@ def extract_outputs(
         completed_segments = 0
         seg_lock = threading.Lock()
         scale_filter = build_scale_filter(p_width, p_height, p_scale_mode)
-        output_ext = "gif" if p_export_mode == "gif" else p_image_format
+        if p_export_mode == "gif":
+            output_ext = "gif"
+        elif p_export_mode == "mp4":
+            output_ext = "mp4"
+        else:
+            output_ext = p_image_format
         used_names = set()
         output_plan = []
 
@@ -297,6 +316,40 @@ def extract_outputs(
                         str(output_path),
                     ]
                 )
+            elif p_export_mode == "mp4":
+                clip_start = segment_start + (segment_length - p_duration) / 2
+                clip_start = max(start_time, clip_start)
+                clip_start = min(clip_start, max(start_time, end_time - 0.05))
+                output_time = clip_start
+
+                vf_parts = [f"fps={p_fps}"]
+                if scale_filter:
+                    vf_parts.append(scale_filter)
+                vf_parts.append("format=yuv420p")
+
+                cmd.extend(
+                    [
+                        "-y",
+                        "-ss",
+                        str(clip_start),
+                        "-t",
+                        str(p_duration),
+                        "-i",
+                        video_path,
+                        "-an",
+                        "-sn",
+                        "-v",
+                        "error",
+                        "-vf",
+                        ",".join(vf_parts),
+                        "-c:v",
+                        encoder_def["name"],
+                        *encoder_def["args"],
+                        "-movflags",
+                        "+faststart",
+                        str(output_path),
+                    ]
+                )
             else:
                 cmd.extend(
                     [
@@ -349,7 +402,10 @@ def extract_outputs(
             }
 
         if p_use_parallel:
-            max_workers = get_subprocess_worker_count(p_output_count)
+            hard_cap = 8
+            if encoder_def and encoder_def.get("max_parallel"):
+                hard_cap = min(hard_cap, encoder_def["max_parallel"])
+            max_workers = get_subprocess_worker_count(p_output_count, hard_cap=hard_cap)
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_idx = {
                     executor.submit(process_segment, segment_index): segment_index
@@ -377,7 +433,7 @@ def extract_outputs(
 
         result["status"] = "done"
         result["outputs"].sort(key=lambda item: item["filename"])
-        on_progress("done", f"完成，共生成 {len(result['outputs'])} 张{output_label}")
+        on_progress("done", f"完成，共生成 {len(result['outputs'])} 个{output_label}")
     except Exception as exc:
         result["status"] = "error"
         result["error"] = str(exc)

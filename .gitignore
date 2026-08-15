@@ -15,6 +15,13 @@ settings.json
 task_history.json
 dxdiag_output.txt
 
+# 本地输出与临时目录
+output/
+outputs/
+temp/
+tmp/
+*.log
+
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/

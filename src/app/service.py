@@ -1,3 +1,4 @@
+from ..media.encoder_catalog import get_encoder_catalog
 from ..platform.system_ops import SystemOps
 from ..runtime.activity_monitor import ActivityMonitor
 from ..runtime.task_runtime import TaskRuntime
@@ -23,6 +24,9 @@ class GetGifService:
 
     def create_task(self, source_dir: str, output_dir: str, params: dict, scan_id: str = "") -> dict:
         return self.task_runtime.create_task(source_dir, output_dir, params, scan_id)
+
+    def get_encoder_catalog(self) -> dict:
+        return get_encoder_catalog()
 
     def get_task_status(self, task_id: str) -> dict | None:
         return self.task_runtime.get_task_status(task_id)

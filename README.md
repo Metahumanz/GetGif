@@ -1,6 +1,6 @@
 # GetGif
 
-一个面向 Windows 的本地小工具，用来批量扫描文件夹中的视频，并按设定参数导出 GIF 或静态图片。
+一个面向 Windows 的本地小工具，用来批量扫描文件夹中的视频，并按设定参数导出 GIF、静态图片或 MP4 视频片段。
 
 应用启动后会在本机开启一个 Web 界面，默认地址为 `http://127.0.0.1:6543`，可以在浏览器里完成目录选择、批量扫描、参数设置、进度查看和结果汇总。
 
@@ -10,8 +10,11 @@
 - 按文件夹创建时间顺序处理视频
 - 支持批量为每个视频截取多张 GIF
 - 支持导出各时间片段的中间帧为静态图片（PNG、JPG）
+- 支持导出各时间片段为 MP4 视频（不含音频）
+- MP4 支持 H.264 / H.265 两种编码标准
+- MP4 编码器可选软件编码（libx264 / libx265）或本机可用的硬件编码（NVIDIA NVENC、Intel QSV、AMD AMF），启动时会自动探测本机可用项
 - 支持自定义跳过片头、跳过片尾、GIF 时长、帧率、尺寸
-- 支持在 GIF 动图和静态图片之间切换导出类型
+- 支持在 GIF 动图、静态图片和 MP4 视频之间切换导出类型
 - 支持保持比例缩放或固定尺寸输出
 - 支持并行处理和硬件加速开关
 - 启动任务前可先扫描视频并查看预计输出体积
@@ -81,16 +84,18 @@ python app.py
 | `skip_head` | 每个视频开头跳过多少秒 |
 | `skip_tail` | 每个视频结尾跳过多少秒 |
 | `num_gifs` | 每个视频导出多少个输出文件 |
-| `export_mode` | 导出类型，支持 `gif` 和 `image` |
+| `export_mode` | 导出类型，支持 `gif`、`image` 和 `mp4` |
 | `image_format` | 静态图片格式，支持 `png` 和 `jpg` |
+| `video_codec` | MP4 编码标准，支持 `h264`（H.264/AVC）和 `h265`（H.265/HEVC） |
+| `video_encoder` | MP4 编码器，支持 `auto`（优先本机可用硬件编码器）或具体编码器名（`libx264`、`libx265`、`h264_nvenc`、`hevc_nvenc`、`h264_qsv`、`hevc_qsv`、`h264_amf`、`hevc_amf`），界面只显示本机真实可用的项 |
 | `output_name_template` | 输出命名模板，支持 `{video_name}`、`{index}`、`{index2}`、`{index3}`、`{mode}`、`{format}` |
-| `gif_duration` | 每张 GIF 的时长，单位秒，仅在 GIF 模式下生效 |
-| `gif_fps` | GIF 帧率，仅在 GIF 模式下生效 |
+| `gif_duration` | 每个输出片段的时长，单位秒，在 GIF 和 MP4 模式下生效 |
+| `gif_fps` | 输出帧率，在 GIF 和 MP4 模式下生效 |
 | `gif_width` | 输出宽度 |
 | `gif_height` | 输出高度，`auto` 模式下一般保持为 `0` |
 | `scale_mode` | `auto` 为保持比例，`fixed` 为固定尺寸 |
-| `use_gpu` | 为 FFmpeg 增加 `-hwaccel auto` |
-| `use_parallel` | 同一视频内并行导出多张 GIF |
+| `use_gpu` | 为 FFmpeg 增加 `-hwaccel auto`（硬件解码加速） |
+| `use_parallel` | 同一视频内并行导出多个片段（使用硬件编码器时会自动降低并行数，避免超过显卡编码会话上限） |
 
 ## 输出结构
 
@@ -104,6 +109,9 @@ output_dir/
   video_b/
     video_b_01.png
     video_b_02.jpg
+  video_c/
+    video_c_01.mp4
+    video_c_02.mp4
 ```
 
 ## 本地配置
@@ -126,17 +134,39 @@ getGif/
     index.html
   src/
     __init__.py
-    config.py
-    service.py
-    webapp.py
+    app/
+      service.py
+      webapp.py
+    core/
+      config.py
+      task_helpers.py
+    media/
+      encoder_catalog.py
+      video_pipeline.py
+    platform/
+      system_ops.py
+    runtime/
+      activity_monitor.py
+      task_history_runtime.py
+      task_queue.py
+      task_runtime.py
+      task_state.py
+    stores/
+      config_store.py
+      history_store.py
+      scan_cache.py
 ```
 
 各文件作用：
 
 - `app.py`：程序入口
-- `src/webapp.py`：Flask 路由与 Web 服务启动逻辑
-- `src/service.py`：扫描视频、读取信息、调用 FFmpeg 导出 GIF 的核心逻辑
-- `src/config.py`：默认配置、路径和常量
+- `src/app/webapp.py`：Flask 路由与 Web 服务启动逻辑
+- `src/app/service.py`：聚合各模块，提供业务接口
+- `src/media/video_pipeline.py`：视频扫描与 FFmpeg 导出（GIF / 图片 / MP4）核心逻辑
+- `src/media/encoder_catalog.py`：H.264/H.265 编码器目录、本机硬件编码器探测与选择
+- `src/runtime/`：任务状态、队列、进度与历史
+- `src/stores/`：配置、历史与扫描缓存的持久化
+- `src/core/config.py`：默认配置、路径和常量
 - `templates/index.html`：前端页面
 - `start.bat`：Windows 启动脚本
 
@@ -151,7 +181,9 @@ getGif/
 - 扫描结果中的“预计占用空间”只是前端粗略估算，不代表最终实际文件大小。
 - 如果视频过短，或者跳过片头片尾之后剩余时长不足，任务会跳过该视频。
 - 程序在长时间无心跳活动后会自动退出，当前默认超时时间为 300 秒。
-- 开启 GPU 并不保证所有机器都明显提速，效果取决于本机 FFmpeg 和显卡环境。
+- 开启 GPU 解码加速并不保证所有机器都明显提速，效果取决于本机 FFmpeg 和显卡环境。
+- MP4 模式下如果选择硬件编码器，实际速度还受显卡编码会话上限影响，程序会自动降低并行数。
+- 硬件编码器以“本机试编码成功”为准出现在界面中，未出现在列表中的项表示当前不可用。
 - 如果命名模板没有包含序号，程序会自动追加后缀以避免同一批任务中的文件重名覆盖。
 - 如果输出目录中已存在同名文件，FFmpeg 会覆盖旧文件。
 
