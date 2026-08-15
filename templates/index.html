@@ -426,6 +426,7 @@
     .status-badge.cancelled  { background: var(--warning-bg); color: var(--warning); }
     .status-badge.timeout    { background: var(--warning-bg); color: var(--warning); }
     .status-badge.scanning   { background: var(--info-bg); color: var(--info); }
+    .status-badge.paused     { background: var(--warning-bg); color: var(--warning); }
 
     /* ═══ Summary ═══ */
     .summary-section {
@@ -830,6 +831,7 @@ function getStatusLabel(status) {
     queued: '等待开始',
     scanning: '查找文件',
     processing: '运行中',
+    paused: '已暂停',
     done: '已完成',
     error: '出错',
     cancelled: '已取消',
@@ -1106,6 +1108,15 @@ function stopPolling() {
 async function pollStatus() {
   if (!currentTaskId) return;
   try {
+    // 轮询时顺便补发心跳：即使心跳定时器被浏览器节流/休眠，轮询也能保活
+    await api('/api/heartbeat', {
+      method: 'POST',
+      body: JSON.stringify({ task_id: currentTaskId }),
+    });
+  } catch (e) {
+    console.warn('Poll heartbeat failed:', e);
+  }
+  try {
     const data = await api(`/api/status/${currentTaskId}`);
 
     // Update progress
@@ -1116,7 +1127,9 @@ async function pollStatus() {
       $('statEta').textContent = p.eta;
       $('statVideo').textContent = `${p.current_video_index} / ${p.total_videos}`;
 
-      if (p.message) {
+      if (data.paused) {
+        $('progressText').textContent = '⏸ 心跳中断，任务已暂停，等待浏览器恢复…';
+      } else if (p.message) {
         $('progressText').textContent = `[${p.current_video || ''}] ${p.message}`;
       }
 
@@ -1137,7 +1150,7 @@ async function pollStatus() {
     }
 
     // Update status badge
-    updateBadge(data.status);
+    updateBadge(data.paused ? 'paused' : data.status);
     refreshTaskDashboard();
 
     // Task finished?
@@ -1454,6 +1467,25 @@ $('sourceDir').addEventListener('input', () => {
   cachedVideoData = null;
   $('scanResult').style.display = 'none';
 });
+
+// ═══ Wake / Resume ═══
+// 标签页从休眠/后台切回时立即补发心跳并重置定时器，
+// 避免浏览器节流或标签页休眠导致后端误判“心跳中断”而暂停/停止任务
+function onPageWake() {
+  startHeartbeat();
+  startPolling();
+  if (currentTaskId) {
+    api('/api/heartbeat', {
+      method: 'POST',
+      body: JSON.stringify({ task_id: currentTaskId }),
+    }).catch(() => {});
+  }
+}
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) onPageWake();
+});
+window.addEventListener('focus', onPageWake);
+window.addEventListener('pageshow', onPageWake);
 
 // ═══ Page Unload ═══
 window.addEventListener('beforeunload', () => {

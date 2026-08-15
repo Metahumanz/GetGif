@@ -48,6 +48,7 @@ class TaskStateStore:
             "output_name_template": params.get("output_name_template", DEFAULT_CONFIG["output_name_template"]),
             "num_outputs": params.get("num_gifs", DEFAULT_CONFIG["num_gifs"]),
             "queue_position": self.get_queue_position_locked(task["id"]),
+            "paused": bool(task.get("paused", False)),
             "latest_message": task.get("progress", {}).get("message") if task.get("progress") else "",
             "log_count": len(task.get("logs", [])),
         }
@@ -172,8 +173,23 @@ class TaskStateStore:
             if not task:
                 return
             task["status"] = "cancelled"
+            task["cancel_reason"] = "user"
+            task["paused"] = False
             task["finished_at"] = now_iso()
             self.append_log_entry(task, "warn", "任务已取消")
+
+    def mark_task_timeout(self, task_id: str):
+        with self.task_lock:
+            task = self.tasks.get(task_id)
+            if not task:
+                return
+            task["status"] = "timeout"
+            task["cancel_reason"] = "timeout"
+            task["paused"] = False
+            task["finished_at"] = now_iso()
+            if task.get("progress"):
+                task["progress"]["message"] = "心跳中断超时，任务已停止"
+            self.append_log_entry(task, "warn", "心跳中断超时，任务已停止")
 
     def mark_task_finished(self, task_id: str, total: int, done_count: int, error_count: int, skip_count: int):
         with self.task_lock:
@@ -261,19 +277,22 @@ class TaskStateStore:
             }
 
     def is_task_cancelled(self, task_id: str) -> bool:
+        """仅检查用户是否主动取消（心跳超时由 TaskRuntime 的等待逻辑单独处理）。"""
         with self.task_lock:
             task = self.tasks.get(task_id)
             if not task:
                 return True
-            if task.get("cancelled", False):
-                return True
+            return bool(task.get("cancelled", False))
 
-            last_hb = self.heartbeat_ts.get(task_id, time.time())
-            if time.time() - last_hb > 30:
-                task["cancelled"] = True
-                task["status"] = "timeout"
-                return True
-        return False
+    def get_cancel_reason(self, task_id: str) -> str:
+        """返回任务停止原因：user（用户取消）/ timeout（心跳中断超时）/ ""（未停止）。"""
+        with self.task_lock:
+            task = self.tasks.get(task_id)
+            if not task:
+                return "unknown"
+            if task.get("cancelled"):
+                return task.get("cancel_reason") or "user"
+            return ""
 
     def cancel_task_request(self, task_id: str) -> tuple[bool, bool]:
         should_archive = False
@@ -283,6 +302,7 @@ class TaskStateStore:
                 return False, False
 
             task["cancelled"] = True
+            task["cancel_reason"] = "user"
             if task["status"] == "queued":
                 task["status"] = "cancelled"
                 task["finished_at"] = now_iso()

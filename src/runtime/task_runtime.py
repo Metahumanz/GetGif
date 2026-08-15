@@ -1,7 +1,8 @@
 import os
+import time
 import traceback
 
-from ..core.config import DEFAULT_CONFIG
+from ..core.config import DEFAULT_CONFIG, HEARTBEAT_GIVE_UP, HEARTBEAT_TIMEOUT
 from ..media.encoder_catalog import (
     get_encoder_catalog,
     normalize_video_codec,
@@ -31,6 +32,42 @@ class TaskRuntime:
         self.history_runtime = TaskHistoryRuntime(self.state_store, history_store)
         self.queue_manager = TaskQueueManager(self.state_store, self.run_task)
 
+    def _wait_heartbeat(self, task_id: str) -> bool:
+        """等待浏览器心跳；返回 True 表示任务应停止（用户取消或心跳中断超时）。
+
+        心跳短暂中断（HEARTBEAT_TIMEOUT 秒内）不暂停；超过该阈值时任务“暂停”等待，
+        心跳恢复后自动继续；超过 HEARTBEAT_GIVE_UP 秒仍无心跳才真正停止任务。
+        """
+        while True:
+            with self.state_store.task_lock:
+                task = self.state_store.tasks.get(task_id)
+                if not task:
+                    return True
+                if task.get("cancelled"):
+                    return True
+
+                last_hb = self.state_store.heartbeat_ts.get(task_id, 0)
+                gap = time.time() - last_hb if last_hb else 0
+                if gap <= HEARTBEAT_TIMEOUT:
+                    if task.get("paused"):
+                        task["paused"] = False
+                        self.state_store.append_log_entry(task, "info", "心跳恢复，任务继续执行")
+                    return False
+
+                if gap > HEARTBEAT_GIVE_UP:
+                    task["cancelled"] = True
+                    task["cancel_reason"] = "timeout"
+                    task["paused"] = False
+                    return True
+
+                if not task.get("paused"):
+                    task["paused"] = True
+                    self.state_store.append_log_entry(task, "warn", "心跳中断，任务已暂停，等待浏览器恢复...")
+
+            # 暂停期间保活（防止程序整体退出），每秒重查一次心跳
+            self.activity_monitor.touch()
+            time.sleep(1)
+
     def run_task(self, task_id: str, source_dir: str, output_dir: str, params: dict, cached_videos: list[dict] | None = None):
         if not self.state_store.mark_task_started(task_id, output_dir, cached_videos is not None):
             return
@@ -48,8 +85,12 @@ class TaskRuntime:
             skip_count = 0
 
             for index, video in enumerate(videos):
-                if self.state_store.is_task_cancelled(task_id):
-                    self.state_store.mark_task_cancelled(task_id)
+                if self._wait_heartbeat(task_id):
+                    reason = self.state_store.get_cancel_reason(task_id)
+                    if reason == "timeout":
+                        self.state_store.mark_task_timeout(task_id)
+                    else:
+                        self.state_store.mark_task_cancelled(task_id)
                     self.history_runtime.archive_task(task_id)
                     return
 

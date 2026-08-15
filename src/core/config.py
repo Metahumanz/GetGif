@@ -12,6 +12,13 @@ AUTO_EXIT_DELAY = 300
 SCAN_CACHE_TTL = 180
 MAX_HISTORY_ITEMS = 100
 
+# 心跳保活策略：
+# - 浏览器每 3 秒发一次心跳；超过 HEARTBEAT_TIMEOUT 秒没收到心跳时，任务“暂停”等待，
+#   心跳恢复后自动继续（应对标签页休眠/电脑短暂睡眠等场景，而不是直接取消任务）。
+# - 超过 HEARTBEAT_GIVE_UP 秒仍无心跳才真正停止任务（状态为 timeout/已断开）。
+HEARTBEAT_TIMEOUT = 90
+HEARTBEAT_GIVE_UP = 1800
+
 VIDEO_EXTENSIONS = {
     ".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv",
     ".webm", ".m4v", ".mpg", ".mpeg", ".3gp", ".ts",
