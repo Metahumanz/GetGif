@@ -42,4 +42,5 @@ DEFAULT_CONFIG = {
     "scale_mode": "auto",
     "use_gpu": False,
     "use_parallel": True,
+    "keep_running": False,
 }

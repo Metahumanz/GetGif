@@ -24,19 +24,26 @@ from .task_queue import TaskQueueManager
 from .task_state import TaskStateStore
 
 
+def _to_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 class TaskRuntime:
     def __init__(self, activity_monitor: ActivityMonitor, scan_cache: ScanCache, history_store: TaskHistoryStore):
         self.activity_monitor = activity_monitor
         self.scan_cache = scan_cache
         self.state_store = TaskStateStore()
         self.history_runtime = TaskHistoryRuntime(self.state_store, history_store)
-        self.queue_manager = TaskQueueManager(self.state_store, self.run_task)
+        self.queue_manager = TaskQueueManager(self.state_store, self.run_task, self.activity_monitor)
 
     def _wait_heartbeat(self, task_id: str) -> bool:
         """等待浏览器心跳；返回 True 表示任务应停止（用户取消或心跳中断超时）。
 
         心跳短暂中断（HEARTBEAT_TIMEOUT 秒内）不暂停；超过该阈值时任务“暂停”等待，
         心跳恢复后自动继续；超过 HEARTBEAT_GIVE_UP 秒仍无心跳才真正停止任务。
+        若任务开启了 keep_running（关闭页面后继续），则完全不受心跳影响。
         """
         while True:
             with self.state_store.task_lock:
@@ -45,6 +52,10 @@ class TaskRuntime:
                     return True
                 if task.get("cancelled"):
                     return True
+
+                # 用户选择“关闭页面后继续”：不因心跳中断暂停或停止
+                if task.get("params", {}).get("keep_running"):
+                    return False
 
                 last_hb = self.state_store.heartbeat_ts.get(task_id, 0)
                 gap = time.time() - last_hb if last_hb else 0
@@ -68,11 +79,19 @@ class TaskRuntime:
             self.activity_monitor.touch()
             time.sleep(1)
 
+    def _on_task_progress(self, task_id, video_index, total_videos, video_name, status, message="", gif_progress=0, step_index=0, steps_per_video=1):
+        # 任务在处理时保活，防止长时间运行且页面无心跳时程序整体退出
+        self.activity_monitor.touch()
+        self.state_store.update_task_progress(
+            task_id, video_index, total_videos, video_name, status, message, gif_progress, step_index, steps_per_video
+        )
+
     def run_task(self, task_id: str, source_dir: str, output_dir: str, params: dict, cached_videos: list[dict] | None = None):
         if not self.state_store.mark_task_started(task_id, output_dir, cached_videos is not None):
             return
 
         try:
+            self.activity_monitor.touch()
             videos = cached_videos if cached_videos is not None else discover_videos(source_dir)
             total = len(videos)
 
@@ -101,7 +120,7 @@ class TaskRuntime:
                     output_dir,
                     params,
                     is_cancelled=lambda: self.state_store.is_task_cancelled(task_id),
-                    on_progress=lambda status, message="", gif_progress=0, step_index=0, steps_per_video=1: self.state_store.update_task_progress(
+                    on_progress=lambda status, message="", gif_progress=0, step_index=0, steps_per_video=1: self._on_task_progress(
                         task_id,
                         index,
                         total,
@@ -138,6 +157,7 @@ class TaskRuntime:
         task_params["image_format"] = normalize_image_format(task_params.get("image_format", "png"))
         task_params["video_codec"] = normalize_video_codec(task_params.get("video_codec", "h264"))
         task_params["video_encoder"] = normalize_video_encoder(task_params.get("video_encoder", "auto"))
+        task_params["keep_running"] = _to_bool(task_params.get("keep_running", False))
         task_params["output_name_template"] = (
             str(task_params.get("output_name_template", DEFAULT_CONFIG["output_name_template"])).strip()
             or DEFAULT_CONFIG["output_name_template"]

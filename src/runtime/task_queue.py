@@ -12,9 +12,10 @@ class HeartbeatFilter(logging.Filter):
 
 
 class TaskQueueManager:
-    def __init__(self, state_store: TaskStateStore, run_task_callback):
+    def __init__(self, state_store: TaskStateStore, run_task_callback, activity_monitor=None):
         self.state_store = state_store
         self.run_task_callback = run_task_callback
+        self.activity_monitor = activity_monitor
         self.active_task_id = None
         self._configure_logging()
         threading.Thread(target=self._queue_worker, daemon=True).start()
@@ -23,6 +24,15 @@ class TaskQueueManager:
         log = logging.getLogger("werkzeug")
         if not any(isinstance(item, HeartbeatFilter) for item in log.filters):
             log.addFilter(HeartbeatFilter())
+
+    def _has_keep_running_task_locked(self) -> bool:
+        """是否存在尚未结束的“关闭页面后继续”任务（排队中或执行中）。"""
+        for task in self.state_store.tasks.values():
+            if task.get("cancelled"):
+                continue
+            if task["status"] in {"queued", "scanning", "processing"} and task.get("params", {}).get("keep_running"):
+                return True
+        return False
 
     def _queue_worker(self):
         while True:
@@ -50,6 +60,10 @@ class TaskQueueManager:
                                 task.get("cached_videos"),
                             )
                             break
+
+                # “关闭页面后继续”的任务在排队期间也要保活，防止页面关闭后程序自动退出
+                if self.activity_monitor and self._has_keep_running_task_locked():
+                    self.activity_monitor.touch()
 
             if task_to_run is None:
                 time.sleep(0.5)

@@ -719,6 +719,12 @@
           <input type="checkbox" id="use_parallel" checked style="width:20px; height:20px; cursor:pointer;">
         </div>
       </div>
+      <div class="setting-item" style="justify-content: center;">
+        <label>关闭页面后继续</label>
+        <div style="display:flex; align-items:center; height:32px;">
+          <input type="checkbox" id="keep_running" style="width:20px; height:20px; cursor:pointer;">
+        </div>
+      </div>
     </div>
 
     <div class="btn-row" style="margin-top:20px;">
@@ -862,6 +868,7 @@ window.onload = async () => {
     if (config.gif_fps) $('gif_fps').value = config.gif_fps;
     if (config.use_gpu !== undefined) $('use_gpu').checked = config.use_gpu;
     if (config.use_parallel !== undefined) $('use_parallel').checked = config.use_parallel;
+    if (config.keep_running !== undefined) $('keep_running').checked = config.keep_running;
   } catch (e) {}
   syncFormState();
   refreshTaskDashboard();
@@ -1021,7 +1028,8 @@ async function startTask() {
     scale_mode: $('scale_mode').value,
     gif_fps: parseInt($('gif_fps').value),
     use_gpu: $('use_gpu').checked,
-    use_parallel: $('use_parallel').checked
+    use_parallel: $('use_parallel').checked,
+    keep_running: $('keep_running').checked
   };
 
   if (!settings.source_dir) { alert('请输入视频文件夹'); return; }
@@ -1053,6 +1061,9 @@ async function startTask() {
     addLog('info', `输出: ${settings.output_dir}`);
     addLog('info', `格式: ${getOutputTypeLabel(settings)}`);
     addLog('info', `命名模板: ${settings.output_name_template || '{video_name}_{index2}'}`);
+    if (settings.keep_running) {
+      addLog('info', '已开启“关闭页面后继续”：即使关闭本页面任务也会继续运行');
+    }
     if (data.queue_position) {
       addLog('info', `已加入队列，排队位置: ${data.queue_position}`);
     }
@@ -1283,6 +1294,7 @@ function renderTaskCard(item, showActions = false) {
       <button class="btn btn-ghost" onclick="openSpecificFolder(decodeURIComponent('${encodeURIComponent(item.output_dir || '')}'))">📁 打开输出</button>
     </div>
   ` : '';
+  const keepRunningNote = item.keep_running ? '<div>模式：关闭页面后继续运行</div>' : '';
 
   return `
     <div class="task-item-card">
@@ -1294,6 +1306,7 @@ function renderTaskCard(item, showActions = false) {
             <div>创建时间：${escapeHtml(formatDateTime(item.created_at))}</div>
             <div>输出模板：${escapeHtml(item.output_name_template || '{video_name}_{index2}')}</div>
             <div>输出目录：${escapeHtml(item.output_dir || '--')}</div>
+            ${keepRunningNote}
             <div>${escapeHtml(summary)}</div>
           </div>
         </div>

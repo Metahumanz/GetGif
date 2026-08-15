@@ -45,6 +45,7 @@ class TaskStateStore:
             "image_format": image_format,
             "video_codec": params.get("video_codec", "h264"),
             "video_encoder": params.get("video_encoder", "auto"),
+            "keep_running": bool(params.get("keep_running", False)),
             "output_name_template": params.get("output_name_template", DEFAULT_CONFIG["output_name_template"]),
             "num_outputs": params.get("num_gifs", DEFAULT_CONFIG["num_gifs"]),
             "queue_position": self.get_queue_position_locked(task["id"]),
