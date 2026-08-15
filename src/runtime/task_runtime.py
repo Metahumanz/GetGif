@@ -1,6 +1,9 @@
 import os
+import re
 import time
 import traceback
+from pathlib import Path
+from urllib.parse import quote
 
 from ..core.config import DEFAULT_CONFIG, HEARTBEAT_GIVE_UP, HEARTBEAT_TIMEOUT
 from ..media.encoder_catalog import (
@@ -13,6 +16,7 @@ from ..media.video_pipeline import (
     collect_scan_results,
     discover_videos,
     extract_outputs,
+    get_folder_creation_time,
     normalize_export_mode,
     normalize_image_format,
 )
@@ -30,10 +34,16 @@ def _to_bool(value) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _natural_key(value) -> list:
+    """文件名自然排序键：demo_2 < demo_10。"""
+    return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", str(value or ""))]
+
+
 class TaskRuntime:
     def __init__(self, activity_monitor: ActivityMonitor, scan_cache: ScanCache, history_store: TaskHistoryStore):
         self.activity_monitor = activity_monitor
         self.scan_cache = scan_cache
+        self.history_store = history_store
         self.state_store = TaskStateStore()
         self.history_runtime = TaskHistoryRuntime(self.state_store, history_store)
         self.queue_manager = TaskQueueManager(self.state_store, self.run_task, self.activity_monitor)
@@ -198,3 +208,126 @@ class TaskRuntime:
             "videos": collect_scan_results(videos),
             "scan_id": self.scan_cache.store(source_dir, videos),
         }
+
+    # ═══ 结果与重跑 ═══
+
+    def _results_source(self, task_id: str) -> tuple[dict | None, bool]:
+        """返回 (任务字典, 是否来自历史)。优先本会话实时状态，其次历史记录。"""
+        task = self.state_store.get_task_dict(task_id)
+        if task:
+            return task, False
+        return self.history_store.get_entry(task_id), True
+
+    def get_task_results(self, task_id: str) -> dict | None:
+        """汇总任务结果：失败/跳过列表 + 每个视频的输出文件（含预览 URL）。"""
+        task, _ = self._results_source(task_id)
+        if not task:
+            return None
+
+        output_dir = task.get("output_dir", "")
+        video_results = []
+        failures = []
+        skipped = []
+
+        for result in task.get("video_results") or []:
+            status = result.get("status")
+            entry = {
+                "video": result.get("video", ""),
+                "name": result.get("name", ""),
+                "status": status,
+                "error": result.get("error"),
+                "output_dir": result.get("output_dir", ""),
+                "outputs": [],
+            }
+            outputs = sorted(
+                result.get("outputs") or [],
+                key=lambda item: _natural_key(item.get("filename", "")),
+            )
+            for item in outputs:
+                file_path = item.get("path", "")
+                rel = os.path.relpath(file_path, output_dir).replace("\\", "/") if output_dir and file_path else ""
+                entry["outputs"].append(
+                    {
+                        "filename": item.get("filename", ""),
+                        "path": file_path,
+                        "time_start": item.get("time_start"),
+                        "url": f"/api/file/{task_id}?p={quote(rel)}" if rel else "",
+                    }
+                )
+            if status == "error":
+                failures.append(
+                    {
+                        "video": entry["video"],
+                        "name": entry["name"],
+                        "error": entry["error"] or "未知错误",
+                        "output_dir": entry["output_dir"],
+                    }
+                )
+            elif status == "skipped":
+                skipped.append({"video": entry["video"], "name": entry["name"], "error": entry["error"] or "已跳过"})
+            video_results.append(entry)
+
+        return {
+            "task_id": task.get("id", task_id),
+            "status": task.get("status"),
+            "source_dir": task.get("source_dir", ""),
+            "output_dir": output_dir,
+            "summary": task.get("summary"),
+            "video_results": video_results,
+            "failures": failures,
+            "skipped": skipped,
+        }
+
+    def retry_failed(self, task_id: str) -> dict:
+        """把原任务中失败的视频重新排队（使用原参数与原顺序）。"""
+        task, _ = self._results_source(task_id)
+        if not task:
+            return {"error": "任务不存在"}
+
+        failed = [r for r in task.get("video_results") or [] if r.get("status") == "error"]
+        if not failed:
+            return {"error": "该任务没有失败的视频"}
+
+        source_dir = task.get("source_dir", "")
+        output_dir = task.get("output_dir", "")
+        params = dict(task.get("params") or {})
+        if not source_dir or not output_dir:
+            return {"error": "任务缺少源目录/输出目录信息，无法重跑"}
+
+        cached = []
+        for result in failed:
+            video_path = result.get("video", "")
+            source_path = Path(video_path)
+            if not source_path.is_file():
+                return {"error": f"源文件已不存在，无法重跑: {video_path}"}
+            cached.append(
+                {
+                    "path": str(source_path),
+                    "name": source_path.stem,
+                    "ext": source_path.suffix.lower(),
+                    "folder": str(source_path.parent),
+                    "folder_ctime": get_folder_creation_time(str(source_path.parent)),
+                }
+            )
+
+        payload = self.state_store.create_task(source_dir, output_dir, params, cached)
+        payload["failed_count"] = len(cached)
+        payload["source_task_id"] = task_id
+        return payload
+
+    def resolve_output_file(self, task_id: str, rel_path: str) -> Path | None:
+        """把 /api/file/<task_id>?p=相对路径 解析为输出目录内的文件（防目录穿越）。"""
+        task, _ = self._results_source(task_id)
+        if not task:
+            return None
+        output_dir = task.get("output_dir", "")
+        if not output_dir or not rel_path:
+            return None
+        base = Path(output_dir).resolve()
+        try:
+            candidate = (base / rel_path).resolve()
+        except OSError:
+            return None
+        if not candidate.is_file() or not candidate.is_relative_to(base):
+            return None
+        return candidate

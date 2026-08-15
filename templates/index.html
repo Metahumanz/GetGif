@@ -462,6 +462,100 @@
     .summary-cell.error  .num { color: var(--error); }
     .summary-cell.skip   .num { color: var(--warning); }
 
+    /* ═══ Results Preview ═══ */
+    .preview-folder {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      margin-bottom: 10px;
+      overflow: hidden;
+    }
+    .preview-folder summary {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      cursor: pointer;
+      list-style: none;
+      font-size: 14px;
+      font-weight: 600;
+      user-select: none;
+    }
+    .preview-folder summary::-webkit-details-marker { display: none; }
+    .preview-folder summary:hover { background: var(--bg-hover); }
+    .pf-name {
+      color: var(--text-primary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .pf-count {
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 500;
+      margin-left: auto;
+      white-space: nowrap;
+    }
+    .pf-btn { padding: 4px 10px; font-size: 12px; }
+    .pf-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 12px;
+      padding: 12px 16px 16px;
+      border-top: 1px solid var(--border);
+    }
+    .pf-item {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .pf-filename {
+      font-size: 11px;
+      color: var(--text-secondary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .pf-media {
+      width: 100%;
+      height: 120px;
+      object-fit: contain;
+      background: var(--bg-primary);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .pf-open {
+      font-size: 12px;
+      color: var(--accent-light);
+      text-decoration: none;
+    }
+    .failure-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      border: 1px solid rgba(231, 76, 60, 0.25);
+      background: var(--error-bg);
+      font-size: 13px;
+      margin-bottom: 6px;
+      flex-wrap: wrap;
+    }
+    .failure-item .vname {
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+    .failure-item .ferror {
+      color: var(--error);
+      font-size: 12px;
+      flex: 1;
+      min-width: 180px;
+    }
+
     /* ═══ Log ═══ */
     .log-area {
       margin-top: 16px;
@@ -782,8 +876,12 @@
     <div class="summary-grid" id="summaryGrid"></div>
     <div id="summaryActions" style="margin-top:20px; text-align:center; display:none;">
       <button class="btn btn-primary" onclick="openOutputFolder()">📁 打开输出目录</button>
+      <button class="btn btn-secondary" onclick="openSourceFolder()">📂 打开源目录</button>
       <button class="btn btn-secondary" onclick="downloadLogs()">📝 导出日志</button>
+      <button class="btn btn-danger" id="btnRetry" style="display:none;" onclick="retryFailed()">🔄 重跑失败项</button>
     </div>
+    <div id="failureBox" style="margin-top:16px;"></div>
+    <div id="previewBox" style="margin-top:16px;"></div>
   </section>
 
   <section class="card" id="taskBoardSection">
@@ -815,6 +913,8 @@
 
 let currentTaskId = null;
 let lastOutputPath = '';
+let lastSourcePath = '';
+let resultsTaskId = null;   // 当前结果面板展示的任务
 let heartbeatTimer = null;
 let pollTimer = null;
 let dashboardTimer = null;
@@ -969,6 +1069,23 @@ async function openOutputFolder() {
   }
 }
 
+async function openSourceFolder() {
+  const path = lastSourcePath || $('sourceDir').value.trim();
+  if (!path) return;
+  try {
+    await api('/api/open_folder', {
+      method: 'POST',
+      body: JSON.stringify({ path: path }),
+    });
+  } catch (e) {
+    console.error('Open folder failed:', e);
+  }
+}
+
+function dirOfPath(path) {
+  return String(path || '').replace(/[\\/][^\\/]*$/, '');
+}
+
 // ═══ Scan Videos ═══
 async function scanVideos() {
   const sourceDir = $('sourceDir').value.trim();
@@ -1053,6 +1170,7 @@ async function startTask() {
 
     currentTaskId = data.task_id;
     lastOutputPath = settings.output_dir;
+    lastSourcePath = settings.source_dir;
     logDedup.clear();
     $('logArea').innerHTML = '';
     $('progressMsg').querySelector('.spinner').style.display = '';
@@ -1189,6 +1307,9 @@ async function pollStatus() {
         addLog('warn', '心跳超时，任务已停止');
       }
 
+      // 加载失败列表与结果预览
+      loadTaskResults();
+
       refreshTaskDashboard();
     }
 
@@ -1237,6 +1358,193 @@ function showSummary(s) {
       <div class="num">${s.skipped}</div><div class="label">跳过</div>
     </div>
   `;
+}
+
+// ═══ Results / Preview / Retry ═══
+async function loadTaskResults() {
+  if (!currentTaskId) return;
+  try {
+    const data = await api(`/api/results/${currentTaskId}`);
+    renderTaskResults(data);
+  } catch (e) {
+    console.warn('Load results failed:', e);
+  }
+}
+
+async function viewTaskResults(taskId) {
+  try {
+    const data = await api(`/api/results/${taskId}`);
+    $('summarySection').classList.add('visible');
+    renderTaskResults(data);
+    $('summarySection').scrollIntoView({ behavior: 'smooth' });
+  } catch (e) {
+    alert('读取结果失败: ' + e.message);
+  }
+}
+
+function renderTaskResults(data) {
+  resultsTaskId = data.task_id;
+  lastOutputPath = data.output_dir || '';
+  lastSourcePath = data.source_dir || '';
+  $('summaryActions').style.display = 'block';
+
+  const failures = data.failures || [];
+  const skipped = data.skipped || [];
+  const btnRetry = $('btnRetry');
+  if (failures.length) {
+    btnRetry.style.display = '';
+    btnRetry.textContent = `🔄 重跑失败项 (${failures.length})`;
+  } else {
+    btnRetry.style.display = 'none';
+  }
+
+  // 失败列表
+  let failureHtml = '';
+  if (failures.length) {
+    failureHtml = `<div class="scan-summary" style="color:var(--error);">失败列表 (${failures.length})</div>`;
+    failureHtml += failures.map(f => `
+      <div class="failure-item">
+        <span style="color:var(--error); font-weight:700;">✗</span>
+        <span class="vname" title="${escapeHtml(f.video)}">${escapeHtml(f.name)}</span>
+        <span class="ferror">${escapeHtml(f.error)}</span>
+        <button class="btn btn-ghost pf-btn" onclick="openSpecificFolder(decodeURIComponent('${encodeURIComponent(dirOfPath(f.video))}'))">📂 源目录</button>
+      </div>`).join('');
+  }
+  if (skipped.length) {
+    failureHtml += `<div class="scan-summary" style="color:var(--warning); margin-top:12px;">跳过列表 (${skipped.length})</div>`;
+    failureHtml += skipped.map(f => `
+      <div class="video-item">
+        <span style="color:var(--warning); font-weight:700;">⊘</span>
+        <span class="vname" title="${escapeHtml(f.video)}">${escapeHtml(f.name)}</span>
+        <span style="color:var(--text-muted); font-size:12px;">${escapeHtml(f.error)}</span>
+      </div>`).join('');
+  }
+  $('failureBox').innerHTML = failureHtml;
+
+  // 生成预览：按输出文件夹分组，组内按文件名（自然顺序），组间按处理顺序（= 生成前读取顺序）
+  const groups = buildPreviewGroups(data);
+  renderPreview(groups);
+}
+
+function buildPreviewGroups(data) {
+  const groups = [];
+  (data.video_results || []).forEach(r => {
+    const outs = (r.outputs || []).filter(o => o.url);
+    if (!outs.length || !r.output_dir) return;
+    let group = groups.find(g => g.dir === r.output_dir);
+    if (!group) {
+      group = { dir: r.output_dir, name: r.name, sourceDir: dirOfPath(r.video), files: [] };
+      groups.push(group);
+    }
+    group.files.push(...outs);
+  });
+  groups.forEach(g => g.files.sort((a, b) => a.filename.localeCompare(b.filename, undefined, { numeric: true })));
+  return groups;
+}
+
+function renderPreview(groups) {
+  const box = $('previewBox');
+  if (!groups.length) {
+    box.innerHTML = '<div class="empty-note">没有可预览的生成文件。</div>';
+    return;
+  }
+  let html = `<div class="scan-summary">生成预览（${groups.length} 个文件夹）</div>`;
+  groups.forEach((g, i) => {
+    html += `
+      <details class="preview-folder" id="pf_${i}">
+        <summary>
+          <span>📁</span>
+          <span class="pf-name" title="${escapeHtml(g.dir)}">${escapeHtml(g.name)}</span>
+          <button class="btn btn-ghost pf-btn" onclick="event.stopPropagation(); openSpecificFolder(decodeURIComponent('${encodeURIComponent(g.dir)}'))">打开目录</button>
+          <button class="btn btn-ghost pf-btn" onclick="event.stopPropagation(); openSpecificFolder(decodeURIComponent('${encodeURIComponent(g.sourceDir)}'))">源目录</button>
+          <span class="pf-count">${g.files.length} 个文件</span>
+        </summary>
+        <div class="pf-grid"></div>
+      </details>`;
+  });
+  box.innerHTML = html;
+  groups.forEach((g, i) => {
+    const el = $('pf_' + i);
+    if (!el) return;
+    el.addEventListener('toggle', () => {
+      if (el.open && !el.dataset.loaded) {
+        el.dataset.loaded = '1';
+        fillPreviewGrid(el.querySelector('.pf-grid'), g.files);
+      }
+    });
+  });
+}
+
+function fillPreviewGrid(container, files) {
+  container.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  files.forEach(f => {
+    const ext = (f.filename.split('.').pop() || '').toLowerCase();
+    const item = document.createElement('div');
+    item.className = 'pf-item';
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'pf-filename';
+    nameEl.textContent = f.filename;
+    nameEl.title = f.path;
+    item.appendChild(nameEl);
+
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) {
+      const img = document.createElement('img');
+      img.className = 'pf-media';
+      img.loading = 'lazy';
+      img.src = f.url;
+      img.alt = f.filename;
+      img.onclick = () => window.open(f.url, '_blank');
+      item.appendChild(img);
+    } else if (['mp4', 'webm', 'm4v'].includes(ext)) {
+      const video = document.createElement('video');
+      video.className = 'pf-media';
+      video.controls = true;
+      video.preload = 'metadata';
+      video.src = f.url;
+      item.appendChild(video);
+    } else {
+      const link = document.createElement('a');
+      link.className = 'pf-open';
+      link.href = f.url;
+      link.target = '_blank';
+      link.textContent = '🔗 打开文件';
+      item.appendChild(link);
+    }
+    frag.appendChild(item);
+  });
+  container.appendChild(frag);
+}
+
+async function retryFailed() {
+  const taskId = resultsTaskId || currentTaskId;
+  if (!taskId) return;
+  const btn = $('btnRetry');
+  btn.disabled = true;
+  try {
+    const data = await api(`/api/retry/${taskId}`, { method: 'POST' });
+    if (data.error) { alert(data.error); btn.disabled = false; return; }
+
+    currentTaskId = data.task_id;
+    lastOutputPath = $('outputDir').value.trim() || lastOutputPath;
+    logDedup.clear();
+    $('logArea').innerHTML = '';
+    $('progressMsg').querySelector('.spinner').style.display = '';
+    addLog('info', `重跑任务开始 [${currentTaskId}]，共 ${data.failed_count} 个失败视频`);
+    $('summarySection').classList.remove('visible');
+    $('progressSection').classList.add('visible');
+    $('btnCancel').style.display = '';
+    $('statEta').textContent = '--:--';
+    $('btnStart').disabled = true;
+    $('btnScan').disabled = true;
+    startHeartbeat();
+    startPolling();
+    refreshTaskDashboard();
+  } catch (e) {
+    alert('重跑失败: ' + e.message);
+    btn.disabled = false;
+  }
 }
 
 function escapeHtml(text) {
@@ -1294,6 +1602,7 @@ function renderTaskCard(item, showActions = false) {
   const queueText = item.queue_position ? `队列位置：${item.queue_position}` : `状态：${getStatusLabel(item.status)}`;
   const actions = showActions ? `
     <div class="task-item-actions">
+      <button class="btn btn-ghost" onclick="viewTaskResults('${item.id}')">🖼 查看结果</button>
       <button class="btn btn-ghost" onclick="downloadLogs('${item.id}')">📝 导出日志</button>
       <button class="btn btn-ghost" onclick="openSpecificFolder(decodeURIComponent('${encodeURIComponent(item.output_dir || '')}'))">📁 打开输出</button>
     </div>

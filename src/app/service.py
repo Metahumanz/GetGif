@@ -28,6 +28,15 @@ class GetGifService:
     def get_encoder_catalog(self) -> dict:
         return get_encoder_catalog()
 
+    def get_task_results(self, task_id: str) -> dict | None:
+        return self.task_runtime.get_task_results(task_id)
+
+    def retry_failed(self, task_id: str) -> dict:
+        return self.task_runtime.retry_failed(task_id)
+
+    def resolve_output_file(self, task_id: str, rel_path: str):
+        return self.task_runtime.resolve_output_file(task_id, rel_path)
+
     def get_task_status(self, task_id: str) -> dict | None:
         return self.task_runtime.get_task_status(task_id)
 

@@ -25,7 +25,7 @@ class TaskStateStore:
             return None
         return queued_ids.index(task_id) + 1
 
-    def build_task_snapshot(self, task: dict, include_logs: bool = False) -> dict:
+    def build_task_snapshot(self, task: dict, include_logs: bool = False, include_video_results: bool = False) -> dict:
         params = task.get("params", {})
         export_mode = normalize_export_mode(params.get("export_mode", "gif"))
         image_format = normalize_image_format(params.get("image_format", "png"))
@@ -55,6 +55,8 @@ class TaskStateStore:
         }
         if include_logs:
             snapshot["logs"] = list(task.get("logs", []))
+        if include_video_results:
+            snapshot["video_results"] = list(task.get("video_results", []))
         return snapshot
 
     def create_task(self, source_dir: str, output_dir: str, task_params: dict, cached_videos: list[dict] | None) -> dict:
@@ -90,6 +92,10 @@ class TaskStateStore:
                 return None
             return self.build_task_snapshot(task)
 
+    def get_task_dict(self, task_id: str) -> dict | None:
+        with self.task_lock:
+            return self.tasks.get(task_id)
+
     def list_live_tasks(self) -> tuple[dict | None, list[dict]]:
         with self.task_lock:
             current = None
@@ -114,7 +120,7 @@ class TaskStateStore:
             if not task or task.get("archived", False):
                 return None
             task["archived"] = True
-            return self.build_task_snapshot(task, include_logs=True)
+            return self.build_task_snapshot(task, include_logs=True, include_video_results=True)
 
     def mark_task_started(self, task_id: str, output_dir: str, has_cached_videos: bool) -> bool:
         with self.task_lock:
@@ -158,6 +164,8 @@ class TaskStateStore:
             task = self.tasks.get(task_id)
             if not task:
                 return
+
+            task.setdefault("video_results", []).append(result)
 
             if result["status"] == "done":
                 self.append_log_entry(task, "ok", f"{video_name} 完成，共生成 {len(result['outputs'])} 个文件")

@@ -40,6 +40,13 @@ class TaskHistoryStore:
         with self._lock:
             return [{key: value for key, value in item.items() if key != "logs"} for item in self._items]
 
+    def get_entry(self, task_id: str) -> dict | None:
+        with self._lock:
+            for item in self._items:
+                if item.get("id") == task_id:
+                    return item
+            return None
+
     def get_log_text(self, task_id: str) -> tuple[str, str] | None:
         with self._lock:
             for item in self._items:

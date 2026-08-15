@@ -3,7 +3,7 @@ import threading
 import time
 import webbrowser
 
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request, send_file
 
 from ..core.config import DEFAULT_CONFIG, HOST, PORT, TEMPLATE_DIR
 from .service import GetGifService
@@ -106,6 +106,28 @@ def create_app() -> Flask:
         if service.open_folder(data.get("path", "").strip()):
             return jsonify({"ok": True})
         return jsonify({"error": "目录不存在"}), 400
+
+    @app.route("/api/results/<task_id>", methods=["GET"])
+    def task_results(task_id):
+        payload = service.get_task_results(task_id)
+        if payload is None:
+            return jsonify({"error": "任务不存在"}), 404
+        return jsonify(payload)
+
+    @app.route("/api/retry/<task_id>", methods=["POST"])
+    def retry_failed(task_id):
+        payload = service.retry_failed(task_id)
+        if "error" in payload:
+            status_code = 404 if "不存在" in payload["error"] else 400
+            return jsonify(payload), status_code
+        return jsonify(payload)
+
+    @app.route("/api/file/<task_id>", methods=["GET"])
+    def serve_output_file(task_id):
+        file_path = service.resolve_output_file(task_id, request.args.get("p", ""))
+        if file_path is None:
+            return jsonify({"error": "文件不存在"}), 404
+        return send_file(file_path)
 
     return app
 
