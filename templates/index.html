@@ -1071,6 +1071,8 @@ async function startTask() {
     // Show progress section
     $('progressSection').classList.add('visible');
     $('summarySection').classList.remove('visible');
+    $('btnCancel').style.display = '';
+    $('statEta').textContent = '--:--';
 
     // Start heartbeat & polling
     startHeartbeat();
@@ -1135,7 +1137,7 @@ async function pollStatus() {
       const p = data.progress;
       $('progressFill').style.width = p.overall + '%';
       $('statOverall').textContent = p.overall + '%';
-      $('statEta').textContent = p.eta;
+      $('statEta').textContent = p.eta || '--:--';
       $('statVideo').textContent = `${p.current_video_index} / ${p.total_videos}`;
 
       if (data.paused) {
@@ -1170,6 +1172,8 @@ async function pollStatus() {
       stopHeartbeat();
       $('btnStart').disabled = false;
       $('btnScan').disabled = false;
+      $('btnCancel').style.display = 'none';
+      $('statEta').textContent = '0:00';
 
       // Hide spinner
       $('progressMsg').querySelector('.spinner').style.display = 'none';
